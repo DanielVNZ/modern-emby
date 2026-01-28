@@ -8,12 +8,7 @@ A modern, sleek media player client for Emby servers. Built with React, TypeScri
 
 - **Modern UI** - Beautiful, responsive interface with smooth animations and transitions
 - **Video Player** - Full-featured player with HLS streaming support
-  - Stats for nerds panel (bitrate, resolution, buffering info)
-  - Up Next popup with auto-play
-  - Seek bar with timestamp preview
-  - Multiple audio track & subtitle support
-  - Version/quality selector
-- **TV Navigation** - Full keyboard/remote control support for TV interfaces
+- **Navigation** - Full keyboard support (remote control support in development)
 - **Series Support** - Browse seasons and episodes with compact grid layout
 - **More Like This** - Discover similar content recommendations
 - **Watch Progress** - Track your progress across all media
