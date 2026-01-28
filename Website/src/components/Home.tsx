@@ -227,7 +227,8 @@ export function Home() {
   useTVNavigation();
   const [latestMovies, setLatestMovies] = useState<EmbyItem[]>([]);
   const [latestEpisodes, setLatestEpisodes] = useState<EmbyItem[]>([]);
-  const [resumeItems, setResumeItems] = useState<EmbyItem[]>([]);
+  const [resumeMovies, setResumeMovies] = useState<EmbyItem[]>([]);
+  const [resumeSeries, setResumeSeries] = useState<EmbyItem[]>([]);
   const [isInitialLoad, setIsInitialLoad] = useState(true); // Track if this is first load
   const [showContent, setShowContent] = useState(false); // Track content fade in
   const [featuredItems, setFeaturedItems] = useState<EmbyItem[]>([]);
@@ -253,12 +254,14 @@ export function Home() {
   const [playbackQuality, setPlaybackQuality] = useState<string>(() => {
     return localStorage.getItem('emby_playbackQuality') || 'manual';
   });
+  const [preferredAudioLang, setPreferredAudioLang] = useState<string>(() => {
+    return localStorage.getItem('emby_preferredAudioLang') || '';
+  });
 
   // Load cached data from sessionStorage immediately on mount
   useEffect(() => {
     const cachedMovies = sessionStorage.getItem('home_latestMovies');
     const cachedEpisodes = sessionStorage.getItem('home_latestEpisodes');
-    const cachedFeatured = sessionStorage.getItem('home_featuredItems');
     
     let hasCache = false;
     
@@ -277,19 +280,6 @@ export function Home() {
         hasCache = true;
       } catch (e) {
         console.error('Failed to parse cached episodes:', e);
-      }
-    }
-    
-    if (cachedFeatured) {
-      try {
-        const items = JSON.parse(cachedFeatured);
-        setFeaturedItems(items);
-        if (items.length > 0) {
-          setFeaturedItem(items[0]);
-        }
-        hasCache = true;
-      } catch (e) {
-        console.error('Failed to parse cached featured:', e);
       }
     }
     
@@ -348,8 +338,8 @@ export function Home() {
       // Keep loading screen visible until all essential data loads
       setIsInitialLoad(true);
       
-      // Only load essential data first - defer genres/years until settings is opened
-      const [movies, episodes, resume] = await Promise.all([
+      // Fetch all data in parallel
+      const [movies, episodes, resumeMovies, resumeEpisodes, recentlyPlayedEpisodes] = await Promise.all([
         // Latest movies by production year
         embyApi.getItems({ 
           recursive: true, 
@@ -366,7 +356,36 @@ export function Home() {
           sortBy: 'PremiereDate', 
           sortOrder: 'Descending' 
         }),
-        embyApi.getItems({ recursive: true, filters: 'IsResumable', limit: 50, sortBy: 'DatePlayed', sortOrder: 'Descending' }),
+        // Resumable movies (partially watched) - sorted by DatePlayed
+        embyApi.getItems({ 
+          recursive: true, 
+          includeItemTypes: 'Movie', 
+          filters: 'IsResumable', 
+          limit: 50, 
+          sortBy: 'DatePlayed', 
+          sortOrder: 'Descending',
+          fields: 'Genres,Overview,CommunityRating,OfficialRating,RunTimeTicks,ProductionYear,PremiereDate,UserData'
+        }),
+        // Resumable episodes (partially watched)
+        embyApi.getItems({ 
+          recursive: true, 
+          includeItemTypes: 'Episode', 
+          filters: 'IsResumable', 
+          limit: 50, 
+          sortBy: 'DatePlayed', 
+          sortOrder: 'Descending',
+          fields: 'Genres,Overview,CommunityRating,OfficialRating,RunTimeTicks,ProductionYear,PremiereDate,UserData,SeriesId,SeriesName,SeriesPrimaryImageTag,ParentIndexNumber,IndexNumber'
+        }),
+        // Recently PLAYED episodes (completed) - these have LastPlayedDate
+        embyApi.getItems({ 
+          recursive: true, 
+          includeItemTypes: 'Episode', 
+          filters: 'IsPlayed', 
+          limit: 100, 
+          sortBy: 'DatePlayed', 
+          sortOrder: 'Descending',
+          fields: 'Genres,Overview,CommunityRating,OfficialRating,RunTimeTicks,ProductionYear,PremiereDate,UserData,SeriesId,SeriesName,SeriesPrimaryImageTag,ParentIndexNumber,IndexNumber'
+        }),
       ]);
 
       setLatestMovies(movies.Items);
@@ -376,54 +395,136 @@ export function Home() {
       sessionStorage.setItem('home_latestMovies', JSON.stringify(movies.Items));
       sessionStorage.setItem('home_latestEpisodes', JSON.stringify(episodes.Items));
       
-      // Deduplicate resume items: for series, show the latest episode (highest season/episode number) per series
-      const seriesEpisodes = new Map<string, EmbyItem>();
-      const nonSeriesItems: EmbyItem[] = [];
-      const itemIndexMap = new Map<string, number>(); // Track original order
-      
-      resume.Items.forEach((item, index) => {
-        itemIndexMap.set(item.Id, index);
-        if (item.Type === 'Episode' && item.SeriesId) {
-          const existing = seriesEpisodes.get(item.SeriesId);
-          if (!existing) {
-            seriesEpisodes.set(item.SeriesId, item);
-          } else {
-            // Compare season and episode numbers - keep the higher one
-            const itemSeason = item.ParentIndexNumber || 0;
-            const itemEpisode = item.IndexNumber || 0;
-            const existingSeason = existing.ParentIndexNumber || 0;
-            const existingEpisode = existing.IndexNumber || 0;
-            
-            if (itemSeason > existingSeason || (itemSeason === existingSeason && itemEpisode > existingEpisode)) {
-              seriesEpisodes.set(item.SeriesId, item);
-            }
+      // Build a map of series ID -> most recent LastPlayedDate from recently played episodes
+      const seriesLastPlayedMap = new Map<string, string>();
+      recentlyPlayedEpisodes.Items.forEach((episode) => {
+        if (episode.SeriesId && episode.UserData?.LastPlayedDate) {
+          // Only set if not already set (first one is most recent due to sorting)
+          if (!seriesLastPlayedMap.has(episode.SeriesId)) {
+            seriesLastPlayedMap.set(episode.SeriesId, episode.UserData.LastPlayedDate);
           }
-        } else {
-          // Keep movies and other non-episode items as-is
-          nonSeriesItems.push(item);
         }
       });
       
-      // Combine series episodes and other items, maintain original order by DatePlayed
-      const deduplicatedResume = [
-        ...Array.from(seriesEpisodes.values()),
-        ...nonSeriesItems
-      ].sort((a, b) => {
-        // Sort by LastPlayedDate if available, otherwise by original API order
-        const aDate = a.UserData?.LastPlayedDate;
-        const bDate = b.UserData?.LastPlayedDate;
-        
-        if (aDate && bDate) {
-          return bDate.localeCompare(aDate);
+      // Also check resumable episodes for LastPlayedDate (partially watched)
+      resumeEpisodes.Items.forEach((episode) => {
+        if (episode.SeriesId && episode.UserData?.LastPlayedDate) {
+          const existing = seriesLastPlayedMap.get(episode.SeriesId);
+          // Use more recent date
+          if (!existing || episode.UserData.LastPlayedDate > existing) {
+            seriesLastPlayedMap.set(episode.SeriesId, episode.UserData.LastPlayedDate);
+          }
         }
-        
-        // Fallback to original index (already sorted by DatePlayed from API)
-        const aIndex = itemIndexMap.get(a.Id) ?? 999;
-        const bIndex = itemIndexMap.get(b.Id) ?? 999;
-        return aIndex - bIndex;
       });
       
-      setResumeItems(deduplicatedResume);
+      // Collect unique series IDs from resumable episodes and recently played
+      const seriesIds = new Set<string>();
+      resumeEpisodes.Items.forEach((ep) => {
+        if (ep.SeriesId) seriesIds.add(ep.SeriesId);
+      });
+      recentlyPlayedEpisodes.Items.forEach((ep) => {
+        if (ep.SeriesId) seriesIds.add(ep.SeriesId);
+      });
+      
+      // Helper to compare episode order
+      const isAfter = (epA: EmbyItem, epB: EmbyItem) => {
+        const seasonA = epA.ParentIndexNumber || 0;
+        const seasonB = epB.ParentIndexNumber || 0;
+        if (seasonA !== seasonB) return seasonA > seasonB;
+        return (epA.IndexNumber || 0) > (epB.IndexNumber || 0);
+      };
+      
+      // Fetch all episodes for each series and apply the same logic as MediaDetails
+      const seriesEpisodesPromises = Array.from(seriesIds).map(async (seriesId): Promise<EmbyItem | null> => {
+        try {
+          const allEpisodesRes = await embyApi.getItems({
+            parentId: seriesId,
+            recursive: true,
+            includeItemTypes: 'Episode',
+            sortBy: 'ParentIndexNumber,IndexNumber',
+            sortOrder: 'Ascending',
+          });
+          
+          const allEpisodes = allEpisodesRes.Items;
+          if (allEpisodes.length === 0) return null;
+          
+          // Sort episodes by season and episode number
+          const sortedEpisodes = [...allEpisodes].sort((a, b) => {
+            const seasonA = a.ParentIndexNumber || 0;
+            const seasonB = b.ParentIndexNumber || 0;
+            if (seasonA !== seasonB) return seasonA - seasonB;
+            return (a.IndexNumber || 0) - (b.IndexNumber || 0);
+          });
+          
+          // Find in-progress episodes (have progress but not completed)
+          const inProgressEpisodes = sortedEpisodes.filter(
+            ep => ep.UserData?.PlaybackPositionTicks && ep.UserData.PlaybackPositionTicks > 0 && !ep.UserData?.Played
+          );
+          
+          let latestInProgress: EmbyItem | null = null;
+          if (inProgressEpisodes.length > 0) {
+            latestInProgress = inProgressEpisodes.reduce((latest, ep) => 
+              isAfter(ep, latest) ? ep : latest
+            , inProgressEpisodes[0]);
+          }
+          
+          // Find last completed episode
+          const completedEpisodes = sortedEpisodes.filter(ep => ep.UserData?.Played);
+          let lastCompleted: EmbyItem | null = null;
+          if (completedEpisodes.length > 0) {
+            lastCompleted = completedEpisodes.reduce((latest, ep) => 
+              isAfter(ep, latest) ? ep : latest
+            , completedEpisodes[0]);
+          }
+          
+          let nextUpEpisode: EmbyItem | null = null;
+          
+          // Apply same logic as MediaDetails
+          if (latestInProgress) {
+            // Check if there's a completed episode AFTER the in-progress one
+            if (lastCompleted && isAfter(lastCompleted, latestInProgress)) {
+              // Find first unwatched after last completed
+              nextUpEpisode = sortedEpisodes.find(ep => 
+                !ep.UserData?.Played && isAfter(ep, lastCompleted!)
+              ) || null;
+            } else {
+              nextUpEpisode = latestInProgress;
+            }
+          } else if (lastCompleted) {
+            // No in-progress, find first unwatched after last completed
+            nextUpEpisode = sortedEpisodes.find(ep => 
+              !ep.UserData?.Played && isAfter(ep, lastCompleted!)
+            ) || null;
+          }
+          
+          if (nextUpEpisode) {
+            // Get series last played date for sorting
+            const seriesLastPlayed = seriesLastPlayedMap.get(seriesId);
+            
+            // Attach series last played date for sorting
+            return {
+              ...nextUpEpisode,
+              UserData: {
+                ...(nextUpEpisode.UserData || {}),
+                LastPlayedDate: seriesLastPlayed || nextUpEpisode.UserData?.LastPlayedDate,
+              } as EmbyItem['UserData'],
+            };
+          }
+          
+          return null;
+        } catch (err) {
+          console.error('Failed to fetch episodes for series:', seriesId, err);
+          return null;
+        }
+      });
+      
+      const seriesNextUpResults = await Promise.all(seriesEpisodesPromises);
+      const processedEpisodes: EmbyItem[] = seriesNextUpResults.filter((ep): ep is EmbyItem => ep !== null);
+      
+      // Movies are already sorted by DatePlayed from API, just use them directly
+      // Set separate states for movies and series
+      setResumeMovies(resumeMovies.Items);
+      setResumeSeries(processedEpisodes);
       
       // Load featured items in parallel, don't wait for it
       loadFeaturedItems();
@@ -496,8 +597,6 @@ export function Home() {
           limit: 10000,
         });
         
-        console.log('Items fetched for years:', itemsResponse.Items.length);
-        
         const yearsSet = new Set<number>();
         itemsResponse.Items.forEach(item => {
           if (item.ProductionYear) {
@@ -506,7 +605,6 @@ export function Home() {
         });
         
         const years = Array.from(yearsSet).sort((a, b) => b - a);
-        console.log('Years extracted:', years.length, years.slice(0, 10));
         setAvailableYears(years);
       } catch (error) {
         console.error('Failed to load years:', error);
@@ -559,7 +657,7 @@ export function Home() {
             }`}
           />
           <div className="absolute inset-0 bg-gradient-to-r from-gray-950 via-gray-950/90 to-gray-950/60" />
-          <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-transparent to-gray-950/30" />
+          <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-transparent to-gray-900/30" />
         </div>
       )}
 
@@ -669,8 +767,20 @@ export function Home() {
       <main className={`max-w-[1600px] mx-auto px-8 ${showFeatured && featuredItem ? '-mt-28 relative z-10' : 'pt-28'}`}>
         {/* Content Rows */}
         <MediaRow
-          title="Continue Watching"
-          items={resumeItems}
+          title="Continue Watching Movies"
+          items={resumeMovies}
+          onItemClick={handleItemClick}
+          onBrowseClick={handleBrowseClick}
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          }
+        />
+        <MediaRow
+          title="Continue Watching TV"
+          items={resumeSeries}
           onItemClick={handleItemClick}
           onBrowseClick={handleBrowseClick}
           icon={
@@ -874,6 +984,46 @@ export function Home() {
                   {playbackQuality === 'manual' 
                     ? 'You will be prompted to select a version when multiple are available'
                     : 'Automatically selects the best matching quality, falls back to nearest available'}
+                </p>
+              </div>
+              
+              {/* Preferred Audio Language */}
+              <div className="mb-4">
+                <label className="block text-sm text-gray-400 mb-2">Default Audio Language</label>
+                <select
+                  value={preferredAudioLang}
+                  onChange={(e) => {
+                    setPreferredAudioLang(e.target.value);
+                    localStorage.setItem('emby_preferredAudioLang', e.target.value);
+                  }}
+                  className="w-full px-3 py-2.5 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+                >
+                  <option value="">Use default track</option>
+                  <option value="eng">English</option>
+                  <option value="jpn">Japanese</option>
+                  <option value="spa">Spanish</option>
+                  <option value="fre">French</option>
+                  <option value="ger">German</option>
+                  <option value="ita">Italian</option>
+                  <option value="por">Portuguese</option>
+                  <option value="rus">Russian</option>
+                  <option value="chi">Chinese</option>
+                  <option value="kor">Korean</option>
+                  <option value="ara">Arabic</option>
+                  <option value="hin">Hindi</option>
+                  <option value="pol">Polish</option>
+                  <option value="dut">Dutch</option>
+                  <option value="swe">Swedish</option>
+                  <option value="nor">Norwegian</option>
+                  <option value="dan">Danish</option>
+                  <option value="fin">Finnish</option>
+                  <option value="tha">Thai</option>
+                  <option value="vie">Vietnamese</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-2">
+                  {preferredAudioLang 
+                    ? 'If available, this language will be selected automatically'
+                    : 'Uses the default audio track from the media file'}
                 </p>
               </div>
             </div>

@@ -701,7 +701,21 @@ export function Player() {
     setResumePosition(startPosition);
     
     const audioStreams = source.MediaStreams.filter(s => s.Type === 'Audio');
-    const defaultAudio = audioStreams.find(s => s.IsDefault) || audioStreams[0];
+    
+    // Check for user's preferred audio language
+    const preferredAudioLang = localStorage.getItem('emby_preferredAudioLang') || '';
+    let defaultAudio = audioStreams.find(s => s.IsDefault) || audioStreams[0];
+    
+    // If user has a preferred language, try to find a matching audio track
+    if (preferredAudioLang) {
+      const preferredTrack = audioStreams.find(s => 
+        s.Language?.toLowerCase() === preferredAudioLang.toLowerCase()
+      );
+      if (preferredTrack) {
+        defaultAudio = preferredTrack;
+        console.log(`Using preferred audio language: ${preferredAudioLang}`);
+      }
+    }
     
     if (defaultAudio) {
       setSelectedAudioIndex(defaultAudio.Index);
@@ -993,9 +1007,16 @@ export function Player() {
     onBack: handleBack,
   });
 
+  // Ref to track if we're in a click (mousedown without significant movement)
+  const isClickRef = useRef(true);
+  const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null);
+  const seekDebounceRef = useRef<number | null>(null);
+
   const handleSeekBarMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(true);
+    isClickRef.current = true;
+    mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
     updateSeekPosition(e);
   };
 
@@ -1007,6 +1028,13 @@ export function Player() {
     setHoverTime(pos * duration);
     
     if (isDragging) {
+      // If mouse moved more than 5px, it's a drag not a click
+      if (mouseDownPosRef.current) {
+        const dx = Math.abs(e.clientX - mouseDownPosRef.current.x);
+        if (dx > 5) {
+          isClickRef.current = false;
+        }
+      }
       updateSeekPosition(e);
     }
   };
@@ -1014,8 +1042,17 @@ export function Player() {
   const handleSeekBarMouseUp = (e: React.MouseEvent<HTMLDivElement>) => {
     if (isDragging) {
       updateSeekPosition(e);
-      seekToTime(dragTime);
+      // Debounce the seek to prevent double-seeking
+      if (seekDebounceRef.current) {
+        clearTimeout(seekDebounceRef.current);
+      }
+      const targetTime = dragTime;
+      seekDebounceRef.current = window.setTimeout(() => {
+        seekToTime(targetTime);
+        seekDebounceRef.current = null;
+      }, 50);
       setIsDragging(false);
+      mouseDownPosRef.current = null;
     }
   };
 
@@ -1025,10 +1062,7 @@ export function Player() {
     const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const time = pos * duration;
     setDragTime(time);
-    if (!isDragging) {
-      // Immediate seek on click
-      seekToTime(time);
-    }
+    // Don't seek immediately - let mouseUp handle it to prevent double-seeking
   };
 
   const seekToTime = (time: number) => {
@@ -1041,8 +1075,17 @@ export function Player() {
   useEffect(() => {
     const handleGlobalMouseUp = () => {
       if (isDragging && videoRef.current) {
-        seekToTime(dragTime);
+        // Debounce the seek to prevent double-seeking
+        if (seekDebounceRef.current) {
+          clearTimeout(seekDebounceRef.current);
+        }
+        const targetTime = dragTime;
+        seekDebounceRef.current = window.setTimeout(() => {
+          seekToTime(targetTime);
+          seekDebounceRef.current = null;
+        }, 50);
         setIsDragging(false);
+        mouseDownPosRef.current = null;
       }
     };
 
@@ -1055,6 +1098,13 @@ export function Player() {
           const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
           const time = pos * duration;
           setDragTime(time);
+          // Track if this is a drag vs click
+          if (mouseDownPosRef.current) {
+            const dx = Math.abs(e.clientX - mouseDownPosRef.current.x);
+            if (dx > 5) {
+              isClickRef.current = false;
+            }
+          }
         }
       }
     };
@@ -1067,6 +1117,9 @@ export function Player() {
     return () => {
       document.removeEventListener('mouseup', handleGlobalMouseUp);
       document.removeEventListener('mousemove', handleGlobalMouseMove);
+      if (seekDebounceRef.current) {
+        clearTimeout(seekDebounceRef.current);
+      }
     };
   }, [isDragging, dragTime, duration]);
 

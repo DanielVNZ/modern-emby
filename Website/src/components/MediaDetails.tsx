@@ -12,6 +12,7 @@ function EpisodeCard({
   progress, 
   isWatched, 
   onEpisodeClick,
+  onToggleWatched,
   formatRuntime 
 }: { 
   episode: EmbyItem; 
@@ -19,12 +20,27 @@ function EpisodeCard({
   progress: number;
   isWatched: boolean;
   onEpisodeClick: (episode: EmbyItem) => void;
+  onToggleWatched: (episode: EmbyItem, currentlyWatched: boolean) => void;
   formatRuntime: (ticks: number) => string;
 }) {
   const [isImageLoaded, setIsImageLoaded] = useState(false);
+  const [isToggling, setIsToggling] = useState(false);
+
+  const handleToggleWatched = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (isToggling) return;
+    setIsToggling(true);
+    try {
+      await onToggleWatched(episode, isWatched);
+    } finally {
+      setIsToggling(false);
+    }
+  };
 
   return (
-    <button
+    <div
       onClick={() => onEpisodeClick(episode)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -33,6 +49,7 @@ function EpisodeCard({
         }
       }}
       tabIndex={0}
+      role="button"
       className="group bg-white/5 hover:bg-white/10 rounded-xl overflow-hidden cursor-pointer transition-all duration-200 focusable-card text-left"
     >
       {/* Thumbnail */}
@@ -76,17 +93,34 @@ function EpisodeCard({
           </div>
         )}
 
-        {/* Watched indicator */}
-        {isWatched && (
-          <div className="absolute bottom-2 right-2 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center">
-            <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 24 24">
+        {/* Watched indicator / Toggle button */}
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={handleToggleWatched}
+          disabled={isToggling}
+          tabIndex={-1}
+          className={`absolute bottom-2 right-2 w-6 h-6 rounded-full flex items-center justify-center transition-all duration-200 z-20 ${
+            isWatched 
+              ? 'bg-green-500 hover:bg-green-600' 
+              : 'bg-gray-700/80 hover:bg-gray-600'
+          } ${!isWatched && !isToggling ? 'opacity-0 group-hover:opacity-100 focus:opacity-100' : ''} ${isToggling ? 'animate-pulse opacity-100' : ''}`}
+          title={isWatched ? 'Mark as unwatched' : 'Mark as watched'}
+        >
+          {isToggling ? (
+            <svg className="w-3 h-3 text-white animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+          ) : (
+            <svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 24 24">
               <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
             </svg>
-          </div>
-        )}
+          )}
+        </button>
 
         {/* Play overlay on hover */}
-        <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center">
+        <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center pointer-events-none">
           <div className="w-12 h-12 rounded-full bg-white/90 flex items-center justify-center shadow-lg pl-1">
             <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 24 24">
               <path d="M8 5v14l11-7z"/>
@@ -114,7 +148,7 @@ function EpisodeCard({
           <p className="text-gray-500 text-xs line-clamp-2 mt-1">{episode.Overview}</p>
         )}
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -136,9 +170,12 @@ export function MediaDetails() {
   const similarScrollRef = useRef<HTMLDivElement>(null);
   const [canScrollSimilarLeft, setCanScrollSimilarLeft] = useState(false);
   const [canScrollSimilarRight, setCanScrollSimilarRight] = useState(true);
+  const hasAutoSelectedSeasonRef = useRef(false);
 
   useEffect(() => {
     if (id) {
+      // Reset the auto-select flag when loading a new item
+      hasAutoSelectedSeasonRef.current = false;
       loadItemDetails();
     }
   }, [id]);
@@ -152,15 +189,91 @@ export function MediaDetails() {
   // Find continue watching episode when all episodes are loaded
   useEffect(() => {
     if (allEpisodes.length > 0) {
-      // Find the first episode with progress (in progress)
-      const inProgressEpisode = allEpisodes.find(
+      // Sort all episodes by season and episode number (ascending)
+      const sortedEpisodes = [...allEpisodes].sort((a, b) => {
+        const seasonA = a.ParentIndexNumber || 0;
+        const seasonB = b.ParentIndexNumber || 0;
+        if (seasonA !== seasonB) return seasonA - seasonB;
+        const epA = a.IndexNumber || 0;
+        const epB = b.IndexNumber || 0;
+        return epA - epB;
+      });
+
+      // Helper to compare episode order
+      const isAfter = (epA: EmbyItem, epB: EmbyItem) => {
+        const seasonA = epA.ParentIndexNumber || 0;
+        const seasonB = epB.ParentIndexNumber || 0;
+        if (seasonA !== seasonB) return seasonA > seasonB;
+        return (epA.IndexNumber || 0) > (epB.IndexNumber || 0);
+      };
+
+      // Find the latest episode that's partially watched (has progress but not completed)
+      const inProgressEpisodes = sortedEpisodes.filter(
         ep => ep.UserData?.PlaybackPositionTicks && ep.UserData.PlaybackPositionTicks > 0 && !ep.UserData?.Played
       );
-      if (inProgressEpisode) {
-        setContinueWatchingEpisode(inProgressEpisode);
+      
+      let latestInProgress: EmbyItem | null = null;
+      if (inProgressEpisodes.length > 0) {
+        // Get the furthest in-progress episode
+        latestInProgress = inProgressEpisodes.reduce((latest, ep) => 
+          isAfter(ep, latest) ? ep : latest
+        , inProgressEpisodes[0]);
+      }
+
+      // Find the last completed episode
+      const completedEpisodes = sortedEpisodes.filter(ep => ep.UserData?.Played);
+      let lastCompleted: EmbyItem | null = null;
+      if (completedEpisodes.length > 0) {
+        lastCompleted = completedEpisodes.reduce((latest, ep) => 
+          isAfter(ep, latest) ? ep : latest
+        , completedEpisodes[0]);
+      }
+
+      let nextUpEpisode: EmbyItem | null = null;
+
+      // If there's an in-progress episode
+      if (latestInProgress) {
+        // Check if there's a completed episode AFTER the in-progress one
+        if (lastCompleted && isAfter(lastCompleted, latestInProgress)) {
+          // There's a completed episode after our in-progress one
+          // So find the first unwatched episode after the last completed one
+          nextUpEpisode = sortedEpisodes.find(ep => 
+            !ep.UserData?.Played && isAfter(ep, lastCompleted!)
+          ) || null;
+        } else {
+          // No completed episode after in-progress, use the in-progress episode
+          nextUpEpisode = latestInProgress;
+        }
+      } else if (lastCompleted) {
+        // No in-progress episodes, find first unwatched after last completed
+        nextUpEpisode = sortedEpisodes.find(ep => 
+          !ep.UserData?.Played && isAfter(ep, lastCompleted!)
+        ) || null;
+      } else {
+        // Nothing watched at all, start from the first episode
+        nextUpEpisode = sortedEpisodes.find(ep => !ep.UserData?.Played) || sortedEpisodes[0];
+      }
+      
+      if (nextUpEpisode) {
+        // Only update if the continue watching episode actually changed
+        setContinueWatchingEpisode(prev => {
+          if (prev?.Id === nextUpEpisode.Id) return prev;
+          return nextUpEpisode;
+        });
+        
+        // Auto-select the season containing the continue watching episode
+        // Only do this on initial load, not when user has manually navigated
+        if (!hasAutoSelectedSeasonRef.current && seasons.length > 0 && nextUpEpisode.ParentIndexNumber !== undefined) {
+          // Find season by index number
+          const seasonForEpisode = seasons.find(s => s.IndexNumber === nextUpEpisode.ParentIndexNumber);
+          if (seasonForEpisode) {
+            setSelectedSeason(seasonForEpisode.Id);
+            hasAutoSelectedSeasonRef.current = true;
+          }
+        }
       }
     }
-  }, [allEpisodes]);
+  }, [allEpisodes, seasons]);
 
   // Focus the play button when loading completes
   useEffect(() => {
@@ -263,6 +376,28 @@ export function MediaDetails() {
 
   const handleEpisodeClick = (episode: EmbyItem) => {
     navigate(`/player/${episode.Id}`);
+  };
+
+  const handleToggleWatched = async (episode: EmbyItem, currentlyWatched: boolean) => {
+    try {
+      if (currentlyWatched) {
+        await embyApi.markUnplayed(episode.Id);
+      } else {
+        await embyApi.markPlayed(episode.Id);
+      }
+      
+      // Only update the displayed episodes, not allEpisodes
+      // This prevents the continue watching effect from running and causing scroll
+      setEpisodes(eps => 
+        eps.map(ep => 
+          ep.Id === episode.Id 
+            ? { ...ep, UserData: { ...ep.UserData, Played: !currentlyWatched, PlaybackPositionTicks: 0 } } as EmbyItem
+            : ep
+        )
+      );
+    } catch (error) {
+      console.error('Failed to toggle watched status:', error);
+    }
   };
 
   const formatRuntime = (ticks?: number) => {
@@ -540,6 +675,7 @@ export function MediaDetails() {
                   progress={progress}
                   isWatched={isWatched}
                   onEpisodeClick={handleEpisodeClick}
+                  onToggleWatched={handleToggleWatched}
                   formatRuntime={formatRuntime}
                 />
               );

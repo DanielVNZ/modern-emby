@@ -189,10 +189,10 @@ class EmbyApiService {
     years?: string;
     fields?: string;
   } = {}): Promise<ItemsResponse> {
-    // Don't cache resume/continue watching items - they need to be fresh
-    const isResumeQuery = params.filters?.includes('IsResumable');
+    // Don't cache resume/continue watching or recently played items - they need to be fresh
+    const isResumeOrPlayedQuery = params.filters?.includes('IsResumable') || params.filters?.includes('IsPlayed');
     
-    if (!isResumeQuery) {
+    if (!isResumeOrPlayedQuery) {
       const cacheKey = this.getCacheKey('getItems', params);
       const cached = this.getFromCache<ItemsResponse>(cacheKey);
       if (cached) {
@@ -218,8 +218,8 @@ class EmbyApiService {
 
     const result = await this.request<ItemsResponse>(`/Users/${this.userId}/Items?${queryParams.toString()}`);
     
-    // Cache the result if it's not a resume query
-    if (!isResumeQuery) {
+    // Cache the result if it's not a resume or played query
+    if (!isResumeOrPlayedQuery) {
       const cacheKey = this.getCacheKey('getItems', params);
       this.setCache(cacheKey, result);
     }
@@ -374,6 +374,50 @@ class EmbyApiService {
       method: 'POST',
       body: JSON.stringify(params),
     });
+  }
+
+  async markPlayed(itemId: string): Promise<void> {
+    await this.request(`/Users/${this.userId}/PlayedItems/${itemId}`, {
+      method: 'POST',
+    });
+  }
+
+  async markUnplayed(itemId: string): Promise<void> {
+    await this.request(`/Users/${this.userId}/PlayedItems/${itemId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Get next up episodes for continue watching - this uses the series' last played date
+  async getNextUp(params: {
+    limit?: number;
+    fields?: string;
+  } = {}): Promise<ItemsResponse> {
+    const queryParams = new URLSearchParams();
+    queryParams.append('UserId', this.userId);
+    if (params.limit) queryParams.append('Limit', params.limit.toString());
+    queryParams.append('Fields', params.fields || 'Genres,Overview,CommunityRating,OfficialRating,RunTimeTicks,ProductionYear,PremiereDate,SeriesPrimaryImage');
+    // EnableTotalRecordCount helps with pagination if needed
+    queryParams.append('EnableTotalRecordCount', 'true');
+    
+    return this.request<ItemsResponse>(`/Shows/NextUp?${queryParams.toString()}`);
+  }
+
+  // Get series items with their last played date
+  async getRecentlyPlayedSeries(params: {
+    limit?: number;
+  } = {}): Promise<ItemsResponse> {
+    const queryParams = new URLSearchParams();
+    queryParams.append('Recursive', 'true');
+    queryParams.append('IncludeItemTypes', 'Series');
+    queryParams.append('Filters', 'IsPlayed');
+    queryParams.append('SortBy', 'DatePlayed');
+    queryParams.append('SortOrder', 'Descending');
+    if (params.limit) queryParams.append('Limit', params.limit.toString());
+    // Include UserData to get LastPlayedDate
+    queryParams.append('Fields', 'Genres,Overview,CommunityRating,OfficialRating,ProductionYear,DateLastMediaAdded,UserData');
+    
+    return this.request<ItemsResponse>(`/Users/${this.userId}/Items?${queryParams.toString()}`);
   }
 }
 
