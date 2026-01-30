@@ -121,8 +121,8 @@ Website/
 | Platform | Status |
 |----------|--------|
 | Windows  | ✅ Supported |
-| Android  | 🚧 In Progress |
-| Web      | ✅ Supported |
+| Android  | ✅ Supported |
+| Web      | ✅ Supported | (self hosted)
 
 ## 🤝 Contributing
 
