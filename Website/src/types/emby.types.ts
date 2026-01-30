@@ -92,6 +92,29 @@ export interface EmbyItem {
     Played: boolean;
     LastPlayedDate?: string;
   };
+  // Provider IDs for deduplication (IMDB, TMDB, etc.)
+  ProviderIds?: {
+    Imdb?: string;
+    Tmdb?: string;
+    Tvdb?: string;
+    [key: string]: string | undefined;
+  };
+  // Alternate versions from different libraries
+  AlternateVersions?: EmbyItem[];
+  // Path for version display
+  Path?: string;
+  // Container for version info
+  Container?: string;
+  // MediaSources for version quality info
+  MediaSources?: Array<{
+    Id: string;
+    Name: string;
+    Path?: string;
+    Container?: string;
+    Size?: number;
+    Bitrate?: number;
+    MediaStreams?: MediaStream[];
+  }>;
 }
 
 export interface ItemsResponse {

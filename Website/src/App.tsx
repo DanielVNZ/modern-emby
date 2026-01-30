@@ -12,6 +12,7 @@ const Browse = lazy(() => import('./components/Browse').then(m => ({ default: m.
 const MediaDetails = lazy(() => import('./components/MediaDetails').then(m => ({ default: m.MediaDetails })));
 const Player = lazy(() => import('./components/Player').then(m => ({ default: m.Player })));
 const Stats = lazy(() => import('./components/Stats').then(m => ({ default: m.Stats })));
+const Settings = lazy(() => import('./components/Settings').then(m => ({ default: m.Settings })));
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const isAuthenticated = authService.isAuthenticated();
@@ -77,6 +78,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <Stats />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute>
+                <Settings />
               </ProtectedRoute>
             }
           />

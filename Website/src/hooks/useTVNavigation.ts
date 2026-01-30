@@ -25,6 +25,7 @@ export function useTVNavigation(options: {
   disableBackKey?: boolean;
 } = {}) {
   const lastFocusedElement = useRef<HTMLElement | null>(null);
+  const lastNavTimeRef = useRef<number>(0);
 
   // Get focusable elements within a container
   const getFocusableElements = useCallback((container: HTMLElement | Document = document): HTMLElement[] => {
@@ -332,16 +333,39 @@ export function useTVNavigation(options: {
   }, [getFocusableElements]);
 
   // Focus an element and scroll it into view
-  const focusElement = useCallback((element: HTMLElement) => {
+  const focusElement = useCallback((element: HTMLElement, direction?: 'up' | 'down' | 'left' | 'right') => {
     // Scroll into view FIRST, then focus
     // This ensures the element is visible before focus changes
     
+    // Check if element is in a horizontal scroll row
+    const isInHorizontalRow = (() => {
+      let parent = element.parentElement;
+      while (parent) {
+        if (parent.getAttribute('role') === 'list' || 
+            parent.classList.contains('tv-row') ||
+            parent.hasAttribute('data-tv-row')) {
+          return true;
+        }
+        const style = window.getComputedStyle(parent);
+        if ((style.overflowX === 'auto' || style.overflowX === 'scroll') && 
+            parent.scrollWidth > parent.clientWidth) {
+          return true;
+        }
+        parent = parent.parentElement;
+      }
+      return false;
+    })();
+    
     // Find scrollable parent and scroll immediately (not smooth)
     let parent = element.parentElement;
+    let handledVerticalScroll = false;
+    
     while (parent) {
       const style = window.getComputedStyle(parent);
       const isScrollableX = style.overflowX === 'auto' || style.overflowX === 'scroll';
+      const isScrollableY = style.overflowY === 'auto' || style.overflowY === 'scroll';
       
+      // Handle horizontal scroll containers
       if (isScrollableX && parent.scrollWidth > parent.clientWidth) {
         const parentRect = parent.getBoundingClientRect();
         const elementRect = element.getBoundingClientRect();
@@ -354,22 +378,49 @@ export function useTVNavigation(options: {
           const scrollAmount = elementRect.right - parentRect.right + padding;
           parent.scrollLeft += scrollAmount;
         }
-        break; // Only handle the first scrollable container
       }
+      
+      // Handle vertical scroll containers (like modal content areas)
+      if (isScrollableY && parent.scrollHeight > parent.clientHeight && !handledVerticalScroll) {
+        const parentRect = parent.getBoundingClientRect();
+        const elementRect = element.getBoundingClientRect();
+        const padding = 60; // Padding from edges within scroll container
+        
+        if (elementRect.top < parentRect.top + padding) {
+          // Element is above visible area - scroll up
+          const scrollAmount = elementRect.top - parentRect.top - padding;
+          parent.scrollBy({ top: scrollAmount, behavior: 'smooth' });
+          handledVerticalScroll = true;
+        } else if (elementRect.bottom > parentRect.bottom - padding) {
+          // Element is below visible area - scroll down
+          const scrollAmount = elementRect.bottom - parentRect.bottom + padding;
+          parent.scrollBy({ top: scrollAmount, behavior: 'smooth' });
+          handledVerticalScroll = true;
+        }
+      }
+      
       parent = parent.parentElement;
     }
     
-    // Ensure the element is visible in the main viewport (vertical scrolling)
-    const rect = element.getBoundingClientRect();
-    const viewportHeight = window.innerHeight;
-    const viewportPadding = 150; // Extra padding to keep element away from edges
+    // Only do main viewport vertical scrolling when navigating vertically (up/down)
+    // and we haven't already handled scrolling in a scroll container
+    // Skip vertical scroll adjustments for horizontal navigation in card rows
+    // This prevents the viewport from jumping up/down when moving left/right
+    const shouldScrollVertically = !handledVerticalScroll && (!isInHorizontalRow || direction === 'up' || direction === 'down');
     
-    if (rect.top < viewportPadding) {
-      // Element is above the viewport - scroll up
-      window.scrollBy({ top: rect.top - viewportPadding, behavior: 'smooth' });
-    } else if (rect.bottom > viewportHeight - viewportPadding) {
-      // Element is below the viewport - scroll down
-      window.scrollBy({ top: rect.bottom - viewportHeight + viewportPadding, behavior: 'smooth' });
+    if (shouldScrollVertically) {
+      // Ensure the element is visible in the main viewport (vertical scrolling)
+      const rect = element.getBoundingClientRect();
+      const viewportHeight = window.innerHeight;
+      const viewportPadding = 150; // Extra padding to keep element away from edges
+      
+      if (rect.top < viewportPadding) {
+        // Element is above the viewport - scroll up
+        window.scrollBy({ top: rect.top - viewportPadding, behavior: 'smooth' });
+      } else if (rect.bottom > viewportHeight - viewportPadding) {
+        // Element is below the viewport - scroll down
+        window.scrollBy({ top: rect.bottom - viewportHeight + viewportPadding, behavior: 'smooth' });
+      }
     }
     
     // Now focus the element
@@ -380,14 +431,21 @@ export function useTVNavigation(options: {
   // Handle keyboard navigation
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     const activeElement = document.activeElement as HTMLElement;
+        // Reduce jank from long-press key repeats
+        if (e.repeat) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
     const container = options.containerSelector 
       ? document.querySelector(options.containerSelector) as HTMLElement 
       : document;
 
     // Check if we're in an input field
     const isInInput = activeElement?.tagName === 'INPUT' || 
-                      activeElement?.tagName === 'TEXTAREA' ||
-                      activeElement?.isContentEditable;
+              activeElement?.tagName === 'TEXTAREA' ||
+              activeElement?.isContentEditable;
+    const isAriaSlider = activeElement?.getAttribute?.('role') === 'slider';
 
     // Handle Back button (Escape, Backspace, XF86Back on Android)
     if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'GoBack' || e.key === 'XF86Back') {
@@ -459,13 +517,13 @@ export function useTVNavigation(options: {
         direction = 'down';
         break;
       case 'ArrowLeft':
-        // Allow left arrow in input fields for cursor movement
-        if (isInInput) return;
+        // Allow left arrow in input/slider fields for value/cursor movement
+        if (isInInput || isAriaSlider) return;
         direction = 'left';
         break;
       case 'ArrowRight':
-        // Allow right arrow in input fields for cursor movement
-        if (isInInput) return;
+        // Allow right arrow in input/slider fields for value/cursor movement
+        if (isInInput || isAriaSlider) return;
         direction = 'right';
         break;
       default:
@@ -473,6 +531,15 @@ export function useTVNavigation(options: {
     }
 
     if (direction) {
+      // Basic throttle to avoid overshooting when holding DPAD
+      const now = Date.now();
+      if (now - lastNavTimeRef.current < 80) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      lastNavTimeRef.current = now;
+
       e.preventDefault();
       e.stopPropagation();
       
@@ -488,7 +555,7 @@ export function useTVNavigation(options: {
       const nextElement = findNextElement(activeElement, direction, container || undefined);
       
       if (nextElement) {
-        focusElement(nextElement);
+        focusElement(nextElement, direction);
       }
     }
   }, [options, getFocusableElements, findNextElement, focusElement]);

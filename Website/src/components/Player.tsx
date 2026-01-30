@@ -4,7 +4,7 @@ import Hls from 'hls.js';
 import { embyApi } from '../services/embyApi';
 import { MediaSelector } from './MediaSelector';
 import { LoadingScreen } from './LoadingScreen';
-import { usePlayerTVNavigation } from '../hooks/useTVNavigation';
+import { usePlayerTVNavigation, useTVNavigation } from '../hooks/useTVNavigation';
 import type { MediaSource, EmbyItem } from '../types/emby.types';
 
 export function Player() {
@@ -76,6 +76,18 @@ export function Player() {
   const hideTimeoutRef = useRef<number | null>(null);
   const progressIntervalRef = useRef<number | null>(null);
   const lastReportedTimeRef = useRef<number>(0);
+  const isSeekingRef = useRef<boolean>(false);
+  // Keyboard hold-to-seek for seek bar
+  const seekHoldIntervalRef = useRef<number | null>(null);
+  const seekHoldDirRef = useRef<'left' | 'right' | null>(null);
+  const seekHoldStartRef = useRef<number>(0);
+  // Focus target for moving from sliders
+  const playButtonFocusRef = useRef<HTMLButtonElement>(null);
+
+  // Enable spatial navigation within the whole player UI (header + controls)
+  useTVNavigation({ disableEnterKey: true, disableBackKey: true, containerSelector: '.player-ui' });
+
+  const isAndroidTV = /Android/i.test(navigator.userAgent);
 
   useEffect(() => {
     if (id) {
@@ -302,7 +314,10 @@ export function Player() {
     if (!video || !streamUrl) return;
 
     const updateTime = () => {
-      setCurrentTime(video.currentTime);
+      // Don't update currentTime state while seeking or dragging - it causes the progress bar to bounce back
+      if (!isSeekingRef.current) {
+        setCurrentTime(video.currentTime);
+      }
       // Update buffered amount - find the range containing current time
       updateBufferedPercentage();
     };
@@ -401,6 +416,9 @@ export function Player() {
   }, [streamUrl]);
 
   const handleMouseMove = () => {
+    // On Android TV, some devices generate synthetic mousemove events
+    // that would keep controls from hiding. Ignore mouse moves on TV.
+    if (isAndroidTV) return;
     setShowControls(true);
     
     if (hideTimeoutRef.current) {
@@ -954,6 +972,25 @@ export function Player() {
     }
   }, [showAudioMenu, showSubtitleMenu]);
 
+  // When controls become visible, move focus to the first control (seek bar or primary button)
+  useEffect(() => {
+    if (showControls) {
+      // Small delay to allow opacity transition to apply and elements to be visible
+      const t = setTimeout(() => {
+        const active = document.activeElement as HTMLElement | null;
+        const inControls = active?.closest('.player-ui');
+        if (!inControls) {
+          const first = document.querySelector<HTMLElement>(
+            // Prefer a primary control like Play/Pause, then other buttons, then sliders
+            '.player-ui .player-control, .player-ui button, .player-ui [role="slider"]'
+          );
+          first?.focus();
+        }
+      }, 50);
+      return () => clearTimeout(t);
+    }
+  }, [showControls]);
+
   const skipForward = useCallback(() => {
     if (!videoRef.current) return;
     videoRef.current.currentTime = Math.min(videoRef.current.currentTime + 10, duration);
@@ -994,6 +1031,17 @@ export function Player() {
     }
   }, []);
 
+  // Helpers for keyboard-accelerated seeking on the seek bar
+  const clampTime = (t: number, min: number, max: number) => Math.max(min, Math.min(max, t));
+  const getSeekStep = (heldMs: number): number => {
+    // Acceleration: start small then ramp up with hold duration
+    if (heldMs > 6000) return 40; // 40s per tick
+    if (heldMs > 3000) return 20; // 20s per tick
+    if (heldMs > 1500) return 10; // 10s per tick
+    if (heldMs > 800) return 5;   // 5s per tick
+    return 2;                     // 2s initial
+  };
+
   // Use the TV navigation hook for player controls
   usePlayerTVNavigation({
     showControls,
@@ -1010,7 +1058,6 @@ export function Player() {
   // Ref to track if we're in a click (mousedown without significant movement)
   const isClickRef = useRef(true);
   const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null);
-  const seekDebounceRef = useRef<number | null>(null);
 
   const handleSeekBarMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -1041,16 +1088,15 @@ export function Player() {
 
   const handleSeekBarMouseUp = (e: React.MouseEvent<HTMLDivElement>) => {
     if (isDragging) {
-      updateSeekPosition(e);
-      // Debounce the seek to prevent double-seeking
-      if (seekDebounceRef.current) {
-        clearTimeout(seekDebounceRef.current);
-      }
-      const targetTime = dragTime;
-      seekDebounceRef.current = window.setTimeout(() => {
-        seekToTime(targetTime);
-        seekDebounceRef.current = null;
-      }, 50);
+      // Calculate the target time directly from the event to avoid stale state
+      const rect = e.currentTarget.getBoundingClientRect();
+      const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const targetTime = pos * duration;
+      setDragTime(targetTime);
+      setCurrentTime(targetTime);
+      
+      // Seek immediately
+      seekToTime(targetTime);
       setIsDragging(false);
       mouseDownPosRef.current = null;
     }
@@ -1067,23 +1113,24 @@ export function Player() {
 
   const seekToTime = (time: number) => {
     if (!videoRef.current) return;
+    isSeekingRef.current = true;
     videoRef.current.currentTime = time;
     setCurrentTime(time);
+    
+    // Clear seeking flag after video has had time to seek
+    // The 'seeked' event would be ideal but this timeout is more reliable
+    setTimeout(() => {
+      isSeekingRef.current = false;
+    }, 500);
   };
 
   // Global mouse up handler for dragging
   useEffect(() => {
     const handleGlobalMouseUp = () => {
       if (isDragging && videoRef.current) {
-        // Debounce the seek to prevent double-seeking
-        if (seekDebounceRef.current) {
-          clearTimeout(seekDebounceRef.current);
-        }
         const targetTime = dragTime;
-        seekDebounceRef.current = window.setTimeout(() => {
-          seekToTime(targetTime);
-          seekDebounceRef.current = null;
-        }, 50);
+        setCurrentTime(targetTime);
+        seekToTime(targetTime);
         setIsDragging(false);
         mouseDownPosRef.current = null;
       }
@@ -1117,9 +1164,6 @@ export function Player() {
     return () => {
       document.removeEventListener('mouseup', handleGlobalMouseUp);
       document.removeEventListener('mousemove', handleGlobalMouseMove);
-      if (seekDebounceRef.current) {
-        clearTimeout(seekDebounceRef.current);
-      }
     };
   }, [isDragging, dragTime, duration]);
 
@@ -1185,7 +1229,7 @@ export function Player() {
       {streamUrl && (
         <div
           ref={containerRef}
-          className="relative w-full h-screen bg-black"
+          className="relative w-full h-screen bg-black player-ui"
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
         >
@@ -1386,7 +1430,7 @@ export function Player() {
           {/* Episode navigation buttons */}
           {item?.Type === 'Episode' && (prevEpisode || nextEpisode) && (
             <div className={`absolute bottom-36 sm:bottom-24 left-1/2 -translate-x-1/2 z-20 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-              <div className="flex items-center gap-1 sm:gap-2 bg-black/60 backdrop-blur-md rounded-full px-2 sm:px-3 py-1.5 sm:py-2 border border-white/10">
+              <div className="flex items-center gap-1 sm:gap-2 bg-black/60 backdrop-blur-md rounded-full px-2 sm:px-3 py-1.5 sm:py-2 border border-white/10" role="list" aria-label="Episode navigation">
                 {/* Previous Episode */}
                 <button
                   onClick={handlePreviousEpisode}
@@ -1396,6 +1440,8 @@ export function Player() {
                       ? 'text-white hover:bg-white/20 hover:scale-105 active:scale-95' 
                       : 'text-gray-600 cursor-not-allowed opacity-50'
                   }`}
+                  tabIndex={0}
+                  role="listitem"
                   title={prevEpisode ? `Previous: ${prevEpisode.Name}` : 'No previous episode'}
                 >
                   <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1411,11 +1457,13 @@ export function Player() {
                 <button
                   onClick={handleNextEpisode}
                   disabled={!nextEpisode}
+                  tabIndex={0}
                   className={`flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 rounded-full transition-all duration-200 ${
                     nextEpisode 
                       ? 'text-white hover:bg-white/20 hover:scale-105 active:scale-95' 
                       : 'text-gray-600 cursor-not-allowed opacity-50'
                   }`}
+                  role="listitem"
                   title={nextEpisode ? `Next: ${nextEpisode.Name}` : 'No next episode'}
                 >
                   <span className="text-sm font-medium hidden sm:inline">Next</span>
@@ -1428,7 +1476,7 @@ export function Player() {
           )}
 
           {/* Custom Control Bar */}
-          <div className={`absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-black/90 to-transparent transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+          <div className={`player-controls absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-black/90 to-transparent transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
             {/* Seek bar */}
             <div className="px-4 pt-2">
               <div 
@@ -1446,25 +1494,61 @@ export function Player() {
                 onMouseEnter={() => setIsHoveringSeekBar(true)}
                 onMouseLeave={() => setIsHoveringSeekBar(false)}
                 onKeyDown={(e) => {
-                  if (e.key === 'ArrowLeft') {
+                  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
                     e.preventDefault();
                     e.stopPropagation();
-                    // Fine-grained control: 5 seconds per press when focused on seek bar
-                    if (videoRef.current) {
-                      videoRef.current.currentTime = Math.max(videoRef.current.currentTime - 5, 0);
+                    const dir = e.key === 'ArrowLeft' ? 'left' : 'right';
+                    // Start or update hold-based scrubbing (no immediate seek)
+                    if (!seekHoldIntervalRef.current || seekHoldDirRef.current !== dir) {
+                      // Restart if direction changes
+                      if (seekHoldIntervalRef.current) {
+                        clearInterval(seekHoldIntervalRef.current);
+                        seekHoldIntervalRef.current = null;
+                      }
+                      seekHoldDirRef.current = dir;
+                      seekHoldStartRef.current = Date.now();
+                      // Begin keyboard scrubbing from current position
+                      if (!isDragging) {
+                        const start = videoRef.current ? videoRef.current.currentTime : currentTime;
+                        setDragTime(start);
+                        setIsDragging(true);
+                      }
+                      // Immediate step for tap (5s), final seek happens on keyup
+                      setDragTime((prev) => clampTime(prev + (dir === 'left' ? -5 : 5), 0, duration));
                       showControlsTemporarily();
+                      // While holding, continue to move the thumb only (no seek yet)
+                      seekHoldIntervalRef.current = window.setInterval(() => {
+                        const heldMs = Date.now() - seekHoldStartRef.current;
+                        const stepSec = getSeekStep(heldMs);
+                        setDragTime((prev) => clampTime(prev + (seekHoldDirRef.current === 'left' ? -stepSec : stepSec), 0, duration));
+                      }, 120);
                     }
-                  } else if (e.key === 'ArrowRight') {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    // Fine-grained control: 5 seconds per press when focused on seek bar
-                    if (videoRef.current) {
-                      videoRef.current.currentTime = Math.min(videoRef.current.currentTime + 5, duration);
-                      showControlsTemporarily();
+                  }
+                  // Up/Down are handled by spatial nav; do not block
+                }}
+                onKeyUp={(e) => {
+                  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                    if (seekHoldIntervalRef.current) {
+                      clearInterval(seekHoldIntervalRef.current);
+                      seekHoldIntervalRef.current = null;
                     }
-                  } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-                    // Allow vertical navigation away from the seek bar
-                    // Don't prevent default, let TV navigation handle it
+                    seekHoldDirRef.current = null;
+                    // Commit seek to the selected position
+                    const target = isDragging ? dragTime : currentTime;
+                    seekToTime(target);
+                    setIsDragging(false);
+                  }
+                }}
+                onBlur={() => {
+                  if (seekHoldIntervalRef.current) {
+                    clearInterval(seekHoldIntervalRef.current);
+                    seekHoldIntervalRef.current = null;
+                  }
+                  seekHoldDirRef.current = null;
+                  // If scrubbing was in progress, commit on blur
+                  if (isDragging) {
+                    seekToTime(dragTime);
+                    setIsDragging(false);
                   }
                 }}
               >
@@ -1505,6 +1589,8 @@ export function Player() {
                 <button
                   onClick={togglePlayPause}
                   className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm transition-all duration-200 hover:scale-110 active:scale-95"
+                  tabIndex={0}
+                  ref={playButtonFocusRef}
                 >
                   <svg className="w-7 h-7" fill="currentColor" viewBox="0 0 24 24">
                     {isPlaying ? (
@@ -1528,6 +1614,7 @@ export function Player() {
                   <button
                     onClick={toggleMute}
                     className="p-2 rounded-full hover:bg-white/10 text-white transition-all duration-200 hover:scale-105 active:scale-95"
+                    tabIndex={0}
                   >
                     <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
                       {isMuted || volume === 0 ? (
@@ -1546,6 +1633,12 @@ export function Player() {
                     step="0.01"
                     value={isMuted ? 0 : volume}
                     onChange={handleVolumeChange}
+                    onKeyDown={(e) => {
+                      if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        playButtonFocusRef.current?.focus();
+                      }
+                    }}
                     className="w-20 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0"
                     style={{
                       background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(isMuted ? 0 : volume) * 100}%, #374151 ${(isMuted ? 0 : volume) * 100}%, #374151 100%)`
@@ -1561,12 +1654,14 @@ export function Player() {
           </div>
 
           {/* Audio, Subtitle, Version selectors and other controls */}
-          <div className={`absolute bottom-24 right-6 z-20 transition-opacity duration-300 flex items-center gap-2 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+          <div className={`absolute bottom-24 right-6 z-20 transition-opacity duration-300 flex items-center gap-2 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} role="list" aria-label="Player options">
             {/* Version selector button */}
             {mediaSources.length > 1 && selectedSource && (
               <button
                 onClick={() => setShowSelector(true)}
                 className="player-control h-10 px-4 bg-black/60 hover:bg-black/80 text-white text-sm rounded-full transition-all duration-200 backdrop-blur-md border border-white/10 hover:border-white/20 hover:scale-105 active:scale-95 inline-flex items-center justify-center gap-2"
+                tabIndex={0}
+                role="listitem"
               >
                 <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -1593,35 +1688,42 @@ export function Player() {
                 showStats ? 'border-blue-500 bg-blue-500/20' : 'border-white/10 hover:border-white/20'
               }`}
               title="Stats for nerds"
+              tabIndex={0}
+              role="listitem"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
               </svg>
             </button>
 
-            {/* Fullscreen button */}
-            <button
-              onClick={toggleFullscreen}
-              className="player-control w-10 h-10 flex items-center justify-center bg-black/60 hover:bg-black/80 text-white rounded-full transition-all duration-200 backdrop-blur-md border border-white/10 hover:border-white/20 hover:scale-105 active:scale-95"
-              title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                {isFullscreen ? (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                ) : (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                )}
-              </svg>
-            </button>
+            {/* Fullscreen button (hide on Android TV) */}
+            {!isAndroidTV && (
+              <button
+                onClick={toggleFullscreen}
+                className="player-control w-10 h-10 flex items-center justify-center bg-black/60 hover:bg-black/80 text-white rounded-full transition-all duration-200 backdrop-blur-md border border-white/10 hover:border-white/20 hover:scale-105 active:scale-95"
+                title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+                tabIndex={0}
+                role="listitem"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {isFullscreen ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                  )}
+                </svg>
+              </button>
+            )}
 
             {/* Subtitle track selector */}
             {selectedSource && selectedSource.MediaStreams.filter(s => s.Type === 'Subtitle' && s.IsTextSubtitleStream).length > 0 && (
-              <div className="relative">
+              <div className="relative" role="listitem">
                 <button
                   onClick={() => { setShowSubtitleMenu(!showSubtitleMenu); setShowAudioMenu(false); }}
                   className={`player-control px-4 py-2.5 bg-black/60 hover:bg-black/80 text-white text-sm rounded-full transition-all duration-200 backdrop-blur-md border hover:scale-105 active:scale-95 flex items-center gap-2 ${
                     selectedSubtitleIndex !== null ? 'border-blue-500 bg-blue-500/20' : 'border-white/10 hover:border-white/20'
                   }`}
+                  tabIndex={0}
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
@@ -1669,10 +1771,11 @@ export function Player() {
 
             {/* Audio track selector */}
             {selectedSource && selectedSource.MediaStreams.filter(s => s.Type === 'Audio').length > 1 && (
-              <div className="relative">
+              <div className="relative" role="listitem">
                 <button
                   onClick={() => { setShowAudioMenu(!showAudioMenu); setShowSubtitleMenu(false); }}
                   className="player-control px-4 py-2.5 bg-black/60 hover:bg-black/80 text-white text-sm rounded-full transition-all duration-200 backdrop-blur-md border border-white/10 hover:border-white/20 hover:scale-105 active:scale-95 flex items-center gap-2"
+                  tabIndex={0}
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />

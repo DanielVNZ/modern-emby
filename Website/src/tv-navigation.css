@@ -45,12 +45,16 @@ body.using-keyboard button:focus,
 body.using-keyboard button:focus-visible,
 body.using-keyboard a:focus,
 body.using-keyboard a:focus-visible,
-body.using-keyboard [tabindex="0"]:focus,
-body.using-keyboard [tabindex="0"]:focus-visible,
+body.using-keyboard [tabindex]:not([tabindex="-1"]):focus,
+body.using-keyboard [tabindex]:not([tabindex="-1"]):focus-visible,
 body.using-keyboard [role="button"]:focus,
 body.using-keyboard [role="button"]:focus-visible,
 body.using-keyboard [role="menuitem"]:focus,
-body.using-keyboard [role="menuitem"]:focus-visible {
+body.using-keyboard [role="menuitem"]:focus-visible,
+body.using-keyboard [role="slider"]:focus,
+body.using-keyboard [role="slider"]:focus-visible,
+body.using-keyboard input[type="range"]:focus,
+body.using-keyboard input[type="range"]:focus-visible {
   outline: 3px solid rgba(59, 130, 246, 0.9) !important;
   outline-offset: 3px;
   box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.25), 
@@ -123,6 +127,15 @@ body.using-keyboard .player-control:focus-visible {
   transform: scale(1.1);
 }
 
+/* Seek bar slider highlight */
+body.using-keyboard [role="slider"]:focus,
+body.using-keyboard input[type="range"]:focus {
+  outline: 3px solid rgba(59, 130, 246, 0.9) !important;
+  outline-offset: 4px;
+  box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.25),
+              0 0 20px rgba(59, 130, 246, 0.4) !important;
+}
+
 /* Player menu items (audio/subtitle tracks) */
 body.using-keyboard .player-menu-item:focus,
 body.using-keyboard .player-menu-item:focus-visible {
@@ -187,3 +200,191 @@ body.keyboard-nav * {
   cursor: none !important;
 }
 
+/* ================================
+   ANDROID TV SIZING TWEAKS (no desktop impact)
+   ================================ */
+
+/* Slightly reduce the root font-size so all rem-based Tailwind spacing/text scale down */
+body.tv-device {
+  font-size: 87.5%; /* 14px base on TVs for better perceived size */
+}
+
+/* Make focused elements a bit less jumpy on TV */
+body.tv-device.using-keyboard .focusable-card:focus,
+body.tv-device.using-keyboard .focusable-card:focus-visible {
+  transform: scale(1.04);
+  outline-width: 3px !important;
+  outline-offset: 5px;
+}
+
+body.tv-device.using-keyboard button:focus,
+body.tv-device.using-keyboard button:focus-visible,
+body.tv-device.using-keyboard a:focus,
+body.tv-device.using-keyboard a:focus-visible,
+body.tv-device.using-keyboard [tabindex="0"]:focus,
+body.tv-device.using-keyboard [tabindex="0"]:focus-visible {
+  outline-width: 2.5px !important;
+  box-shadow: 0 0 0 5px rgba(59, 130, 246, 0.22), 0 0 16px rgba(59, 130, 246, 0.35) !important;
+}
+
+/* Primary action buttons: slightly denser on TV */
+body.tv-device .primary-action {
+  font-size: 0.95rem;
+  padding: 0.7em 1.1em;
+}
+
+/* Player controls focus less dramatic */
+body.tv-device.using-keyboard .player-control:focus,
+body.tv-device.using-keyboard .player-control:focus-visible {
+  transform: scale(1.06);
+  outline-width: 2.5px !important;
+}
+
+/* Home hero: keep normal sizing */
+body.tv-device .home-hero.tv-hero {
+  padding-bottom: 0 !important;
+  min-height: unset !important;
+  height: auto !important;
+}
+
+/* MediaDetails hero: padding-driven layout on TV */
+body.tv-device .media-details .tv-hero {
+  padding-bottom: 200px !important;
+  min-height: unset !important;
+  height: auto !important;
+}
+
+/* Tighten general line-heights for headings on TV */
+body.tv-device h1, body.tv-device h2, body.tv-device h3 {
+  line-height: 1.15;
+}
+
+/* Home hero title/overview scale down on TV */
+body.tv-device .tv-hero-title {
+  font-size: clamp(1.8rem, 4.6vw, 3.2rem) !important; /* around 32-52px */
+  margin-bottom: 0.6rem !important;
+}
+
+body.tv-device .tv-hero-overview {
+  font-size: 0.98rem !important;
+  line-height: 1.45 !important;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2 !important; /* reduce text height to avoid overlap */
+  line-clamp: 2 !important;
+  overflow: hidden;
+}
+
+/* Remove negative pull-up on TV to avoid overlap with hero */
+body.tv-device .home-main {
+  margin-top: 0 !important;
+  padding-top: 1.25rem !important; /* ~20px */
+}
+
+/* ================================
+   MEDIA DETAILS (TV) LAYOUT FIXES
+   ================================ */
+
+/* Pull episodes up closer to hero content */
+body.tv-device .media-details .media-episodes-section {
+  /* Pull row upward to visually sit under hero while staying in flow */
+  margin-top: -160px !important;
+  position: relative !important;
+  z-index: 20 !important;
+}
+
+/* Make the episode grid denser on TV */
+body.tv-device .episodes-grid,
+body.tv-device .tv-episodes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px !important;
+}
+
+/* Shrink season tabs a bit */
+body.tv-device .season-tabs button,
+body.tv-device .tv-season-tabs button {
+  padding: 0.35rem 0.75rem !important;
+  font-size: 0.95rem !important;
+}
+
+/* Tighten metadata chips */
+body.tv-device .media-details .px-3.py-1 {
+  padding: 0.25rem 0.6rem !important;
+  font-size: 0.8rem !important;
+}
+
+/* ================================
+   MEDIA DETAILS (TV) EPISODE CARDS
+   ================================ */
+
+/* Season tabs: smaller pills on TV */
+body.tv-device .media-details .season-tabs .focusable-tab {
+  font-size: 0.9rem;
+  padding: 0.35rem 0.75rem !important;
+}
+
+/* Episodes grid: slightly tighter gaps on TV */
+body.tv-device .media-details .episodes-grid {
+  gap: 0.5rem !important;
+}
+
+/* Episode card: tone down internal text size and clamp description */
+body.tv-device .media-details .tv-episode-card {
+  border-radius: 0.75rem;
+}
+body.tv-device .media-details .tv-episode-card h3 {
+  font-size: 0.95rem;
+}
+body.tv-device .media-details .tv-episode-card p {
+  font-size: 0.85rem;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+/* Fix episode card thumbnail positioning */
+body.tv-device .media-details .tv-episode-card .aspect-video {
+  aspect-ratio: 16/9;
+}
+body.tv-device .media-details .tv-episode-card .aspect-video img {
+  object-position: center center;
+}
+
+/* ================================
+   SETTINGS MODAL TV STYLES
+   ================================ */
+
+/* Settings modal select elements - larger touch targets for TV */
+body.using-keyboard select.focusable-tab:focus,
+body.using-keyboard select.focusable-tab:focus-visible {
+  outline: 3px solid rgba(59, 130, 246, 1) !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.25),
+              0 0 16px rgba(59, 130, 246, 0.4) !important;
+}
+
+/* TV device specific: larger form elements */
+body.tv-device select.focusable-tab {
+  font-size: 1rem;
+  padding: 0.875rem 1rem !important;
+  min-height: 3rem;
+}
+
+body.tv-device button.focusable-tab {
+  min-height: 2.75rem;
+}
+
+/* Settings modal buttons - ensure proper focus visibility */
+body.using-keyboard .focusable-tab:focus,
+body.using-keyboard .focusable-tab:focus-visible {
+  outline: 3px solid rgba(59, 130, 246, 1) !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.25),
+              0 0 16px rgba(59, 130, 246, 0.4) !important;
+  z-index: 10;
+  position: relative;
+}

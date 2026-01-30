@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, memo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { embyApi } from '../services/embyApi';
+import { deduplicateItems } from '../services/deduplication';
 import { useAuth } from '../hooks/useAuth';
 import { useTVNavigation } from '../hooks/useTVNavigation';
 import type { EmbyItem } from '../types/emby.types';
@@ -234,28 +235,19 @@ export function Home() {
   const [featuredItems, setFeaturedItems] = useState<EmbyItem[]>([]);
   const [featuredItem, setFeaturedItem] = useState<EmbyItem | null>(null);
   const [isImageFading, setIsImageFading] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [showFeatured, setShowFeatured] = useState(() => {
+  const [showFeatured] = useState(() => {
     const saved = localStorage.getItem('emby_showFeatured');
     return saved !== null ? JSON.parse(saved) : true;
   });
-  const [availableGenres, setAvailableGenres] = useState<string[]>([]);
-  const [availableYears, setAvailableYears] = useState<number[]>([]);
-  const [featuredGenre, setFeaturedGenre] = useState<string>(() => {
+  const [featuredGenre] = useState<string>(() => {
     return localStorage.getItem('emby_featuredGenre') || '';
   });
-  const [featuredYear, setFeaturedYear] = useState<string>(() => {
+  const [featuredYear] = useState<string>(() => {
     return localStorage.getItem('emby_featuredYear') || '';
   });
-  const [featuredMediaType, setFeaturedMediaType] = useState<{ movies: boolean; tvShows: boolean }>(() => {
+  const [featuredMediaType] = useState<{ movies: boolean; tvShows: boolean }>(() => {
     const saved = localStorage.getItem('emby_featuredMediaType');
     return saved ? JSON.parse(saved) : { movies: true, tvShows: true };
-  });
-  const [playbackQuality, setPlaybackQuality] = useState<string>(() => {
-    return localStorage.getItem('emby_playbackQuality') || 'manual';
-  });
-  const [preferredAudioLang, setPreferredAudioLang] = useState<string>(() => {
-    return localStorage.getItem('emby_preferredAudioLang') || '';
   });
 
   // Load cached data from sessionStorage immediately on mount
@@ -292,13 +284,6 @@ export function Home() {
   useEffect(() => {
     loadData();
   }, []);
-
-  useEffect(() => {
-    // Load filter options when settings is opened
-    if (showSettings && availableYears.length === 0) {
-      loadFilterOptions();
-    }
-  }, [showSettings]);
 
   useEffect(() => {
     // Rotate featured items every 10 seconds
@@ -388,11 +373,13 @@ export function Home() {
         }),
       ]);
 
-      setLatestMovies(movies.Items);
+      // Deduplicate movies that exist in multiple libraries
+      const deduplicatedMovies = deduplicateItems(movies.Items);
+      setLatestMovies(deduplicatedMovies);
       setLatestEpisodes(episodes.Items);
       
       // Cache movies and episodes in sessionStorage for instant loading on return
-      sessionStorage.setItem('home_latestMovies', JSON.stringify(movies.Items));
+      sessionStorage.setItem('home_latestMovies', JSON.stringify(deduplicatedMovies));
       sessionStorage.setItem('home_latestEpisodes', JSON.stringify(episodes.Items));
       
       // Build a map of series ID -> most recent LastPlayedDate from recently played episodes
@@ -521,9 +508,9 @@ export function Home() {
       const seriesNextUpResults = await Promise.all(seriesEpisodesPromises);
       const processedEpisodes: EmbyItem[] = seriesNextUpResults.filter((ep): ep is EmbyItem => ep !== null);
       
-      // Movies are already sorted by DatePlayed from API, just use them directly
+      // Movies are already sorted by DatePlayed from API, deduplicate them
       // Set separate states for movies and series
-      setResumeMovies(resumeMovies.Items);
+      setResumeMovies(deduplicateItems(resumeMovies.Items));
       setResumeSeries(processedEpisodes);
       
       // Load featured items in parallel, don't wait for it
@@ -580,40 +567,6 @@ export function Home() {
     }
   };
 
-  const loadFilterOptions = async () => {
-    try {
-      const [genresResponse] = await Promise.all([
-        embyApi.getGenres({ includeItemTypes: 'Movie,Series' }),
-      ]);
-      
-      setAvailableGenres(genresResponse.Items.map(g => g.Name));
-      
-      // Get years from actual items since /Years endpoint may not work
-      try {
-        const itemsResponse = await embyApi.getItems({
-          recursive: true,
-          includeItemTypes: 'Movie,Series',
-          fields: 'ProductionYear',
-          limit: 10000,
-        });
-        
-        const yearsSet = new Set<number>();
-        itemsResponse.Items.forEach(item => {
-          if (item.ProductionYear) {
-            yearsSet.add(item.ProductionYear);
-          }
-        });
-        
-        const years = Array.from(yearsSet).sort((a, b) => b - a);
-        setAvailableYears(years);
-      } catch (error) {
-        console.error('Failed to load years:', error);
-      }
-    } catch (error) {
-      console.error('Failed to load filter options:', error);
-    }
-  };
-
   const handleItemClick = useCallback((item: EmbyItem) => {
     // For episodes, go to the parent series details page
     if (item.Type === 'Episode' && item.SeriesId) {
@@ -662,7 +615,7 @@ export function Home() {
       )}
 
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-50 bg-gradient-to-b from-black/80 to-transparent backdrop-blur-sm">
+      <header className="relative z-20 bg-gradient-to-b from-black/80 to-transparent">
         <div className="max-w-[1600px] mx-auto px-8 py-5 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <img src="/Logo.png" alt="Modern Emby" className="h-15 object-contain rounded-xl" />
@@ -689,7 +642,7 @@ export function Home() {
               Stats
             </button>
             <button
-              onClick={() => setShowSettings(true)}
+              onClick={() => navigate('/settings')}
               tabIndex={0}
               className="px-5 py-2.5 text-base text-gray-300 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 flex items-center gap-2 focusable-item"
             >
@@ -715,7 +668,7 @@ export function Home() {
 
       {/* Hero Section */}
       {showFeatured && featuredItem && (
-        <div className="relative h-[80vh] min-h-[560px] overflow-hidden z-10">
+        <div className="relative h-[80vh] min-h-[560px] overflow-hidden z-10 tv-hero home-hero">
           {/* Hero Content */}
           <div className="relative h-full max-w-[1600px] mx-auto px-8 flex items-center">
             <div className="max-w-3xl pt-20">
@@ -733,10 +686,10 @@ export function Home() {
                 )}
               </div>
               
-              <h2 className="text-6xl font-bold text-white mb-5 leading-tight">{featuredItem.Name}</h2>
+              <h2 className="text-6xl font-bold text-white mb-5 leading-tight tv-hero-title">{featuredItem.Name}</h2>
               
               {featuredItem.Overview && (
-                <p className="text-gray-200 text-xl leading-relaxed mb-8 line-clamp-3">{featuredItem.Overview}</p>
+                <p className="text-gray-200 text-xl leading-relaxed mb-8 line-clamp-3 tv-hero-overview">{featuredItem.Overview}</p>
               )}
               
               <div className="flex items-center gap-5">
@@ -764,7 +717,7 @@ export function Home() {
       )}
 
       {/* Main Content */}
-      <main className={`max-w-[1600px] mx-auto px-8 ${showFeatured && featuredItem ? '-mt-28 relative z-10' : 'pt-28'}`}>
+      <main className={`max-w-[1600px] mx-auto px-8 home-main ${showFeatured && featuredItem ? '-mt-28 relative z-10' : 'pt-28'}`}>
         {/* Content Rows */}
         <MediaRow
           title="Continue Watching Movies"
@@ -818,232 +771,6 @@ export function Home() {
 
       {/* Footer Spacing */}
       <div className="h-12" />
-
-      {/* Settings Modal */}
-      {showSettings && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          {/* Backdrop */}
-          <div 
-            className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-            onClick={() => setShowSettings(false)}
-          />
-          
-          {/* Modal */}
-          <div className="relative bg-gray-900 rounded-2xl shadow-2xl border border-gray-800 w-full max-w-md max-h-[85vh] flex flex-col overflow-hidden">
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800 flex-shrink-0">
-              <h2 className="text-xl font-bold text-white">Settings</h2>
-              <button
-                onClick={() => setShowSettings(false)}
-                tabIndex={0}
-                className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center text-gray-400 hover:text-white transition-colors focusable-item"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            
-            {/* Content - Scrollable */}
-            <div className="px-6 py-4 overflow-y-auto flex-1">
-              <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Home Screen</h3>
-              
-              {/* Featured Section Toggle */}
-              <div className="flex items-center justify-between py-3">
-                <div>
-                  <p className="text-white font-medium">Featured Section</p>
-                  <p className="text-sm text-gray-500">Show the hero banner at the top of the home screen</p>
-                </div>
-                <button
-                  onClick={() => {
-                    const newValue = !showFeatured;
-                    setShowFeatured(newValue);
-                    localStorage.setItem('emby_showFeatured', JSON.stringify(newValue));
-                  }}
-                  tabIndex={0}
-                  className={`relative w-12 h-7 rounded-full transition-colors focusable-item ${
-                    showFeatured ? 'bg-blue-600' : 'bg-gray-700'
-                  }`}
-                >
-                  <div className={`absolute top-1 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                    showFeatured ? 'translate-x-6' : 'translate-x-1'
-                  }`} />
-                </button>
-              </div>
-              
-              {/* Featured Filters - only show when featured is enabled */}
-              {showFeatured && (
-                <div className="mt-4 pt-4 border-t border-gray-800">
-                  <p className="text-white font-medium mb-3">Featured Content Filters</p>
-                  <p className="text-sm text-gray-500 mb-4">Curate what appears in the featured section</p>
-                  
-                  {/* Media Type Checkboxes */}
-                  <div className="mb-4">
-                    <label className="block text-sm text-gray-400 mb-2">Content Type</label>
-                    <div className="flex gap-4">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={featuredMediaType.movies}
-                          onChange={(e) => {
-                            const newValue = { ...featuredMediaType, movies: e.target.checked };
-                            // Ensure at least one is selected
-                            if (!newValue.movies && !newValue.tvShows) {
-                              newValue.tvShows = true;
-                            }
-                            setFeaturedMediaType(newValue);
-                            localStorage.setItem('emby_featuredMediaType', JSON.stringify(newValue));
-                          }}
-                          className="w-4 h-4 rounded bg-gray-800 border-gray-600 text-blue-600 focus:ring-blue-500 focus:ring-offset-gray-900"
-                        />
-                        <span className="text-white text-sm">Movies</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={featuredMediaType.tvShows}
-                          onChange={(e) => {
-                            const newValue = { ...featuredMediaType, tvShows: e.target.checked };
-                            // Ensure at least one is selected
-                            if (!newValue.movies && !newValue.tvShows) {
-                              newValue.movies = true;
-                            }
-                            setFeaturedMediaType(newValue);
-                            localStorage.setItem('emby_featuredMediaType', JSON.stringify(newValue));
-                          }}
-                          className="w-4 h-4 rounded bg-gray-800 border-gray-600 text-blue-600 focus:ring-blue-500 focus:ring-offset-gray-900"
-                        />
-                        <span className="text-white text-sm">TV Shows</span>
-                      </label>
-                    </div>
-                  </div>
-                  
-                  {/* Genre Selector */}
-                  <div className="mb-4">
-                    <label className="block text-sm text-gray-400 mb-2">Genre</label>
-                    <select
-                      value={featuredGenre}
-                      onChange={(e) => {
-                        setFeaturedGenre(e.target.value);
-                        localStorage.setItem('emby_featuredGenre', e.target.value);
-                      }}
-                      className="w-full px-3 py-2.5 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
-                    >
-                      <option value="">Any Genre</option>
-                      {availableGenres.map((genre) => (
-                        <option key={genre} value={genre}>{genre}</option>
-                      ))}
-                    </select>
-                  </div>
-                  
-                  {/* Year Selector */}
-                  <div className="mb-2">
-                    <label className="block text-sm text-gray-400 mb-2">Year</label>
-                    <select
-                      value={featuredYear}
-                      onChange={(e) => {
-                        setFeaturedYear(e.target.value);
-                        localStorage.setItem('emby_featuredYear', e.target.value);
-                      }}
-                      className="w-full px-3 py-2.5 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
-                    >
-                      <option value="">Any Year</option>
-                      {availableYears.map((year) => (
-                        <option key={year} value={year}>{year}</option>
-                      ))}
-                    </select>
-                  </div>
-                  
-                  <p className="text-xs text-gray-600 mt-3">Changes will apply on next page load</p>
-                </div>
-              )}
-            </div>
-
-            {/* Playback Preferences Section */}
-            <div className="px-6 py-4 border-t border-gray-800">
-              <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">Playback Preferences</h3>
-              
-              <div className="mb-4">
-                <label className="block text-sm text-gray-400 mb-2">Video Quality</label>
-                <select
-                  value={playbackQuality}
-                  onChange={(e) => {
-                    setPlaybackQuality(e.target.value);
-                    localStorage.setItem('emby_playbackQuality', e.target.value);
-                  }}
-                  className="w-full px-3 py-2.5 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
-                >
-                  <option value="manual">Manual (Show version selector)</option>
-                  <option value="4k">Prefer 4K (2160p)</option>
-                  <option value="1080p">Prefer 1080p</option>
-                  <option value="720p">Prefer 720p</option>
-                  <option value="highest">Always Highest Quality</option>
-                  <option value="lowest">Always Lowest Quality (Save bandwidth)</option>
-                </select>
-                <p className="text-xs text-gray-500 mt-2">
-                  {playbackQuality === 'manual' 
-                    ? 'You will be prompted to select a version when multiple are available'
-                    : 'Automatically selects the best matching quality, falls back to nearest available'}
-                </p>
-              </div>
-              
-              {/* Preferred Audio Language */}
-              <div className="mb-4">
-                <label className="block text-sm text-gray-400 mb-2">Default Audio Language</label>
-                <select
-                  value={preferredAudioLang}
-                  onChange={(e) => {
-                    setPreferredAudioLang(e.target.value);
-                    localStorage.setItem('emby_preferredAudioLang', e.target.value);
-                  }}
-                  className="w-full px-3 py-2.5 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
-                >
-                  <option value="">Use default track</option>
-                  <option value="eng">English</option>
-                  <option value="jpn">Japanese</option>
-                  <option value="spa">Spanish</option>
-                  <option value="fre">French</option>
-                  <option value="ger">German</option>
-                  <option value="ita">Italian</option>
-                  <option value="por">Portuguese</option>
-                  <option value="rus">Russian</option>
-                  <option value="chi">Chinese</option>
-                  <option value="kor">Korean</option>
-                  <option value="ara">Arabic</option>
-                  <option value="hin">Hindi</option>
-                  <option value="pol">Polish</option>
-                  <option value="dut">Dutch</option>
-                  <option value="swe">Swedish</option>
-                  <option value="nor">Norwegian</option>
-                  <option value="dan">Danish</option>
-                  <option value="fin">Finnish</option>
-                  <option value="tha">Thai</option>
-                  <option value="vie">Vietnamese</option>
-                </select>
-                <p className="text-xs text-gray-500 mt-2">
-                  {preferredAudioLang 
-                    ? 'If available, this language will be selected automatically'
-                    : 'Uses the default audio track from the media file'}
-                </p>
-              </div>
-            </div>
-            
-            {/* Footer */}
-            <div className="px-6 py-4 bg-gray-800/50 border-t border-gray-800">
-              <button
-                onClick={() => {
-                  setShowSettings(false);
-                  // Reload to apply featured filters
-                  loadData();
-                }}
-                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
-              >
-                Save & Apply
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <style>{`
         .scrollbar-hide::-webkit-scrollbar {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { embyApi } from '../services/embyApi';
+import { deduplicateItems } from '../services/deduplication';
 import { useTVNavigation } from '../hooks/useTVNavigation';
 import type { EmbyItem } from '../types/emby.types';
 import { LoadingScreen } from './LoadingScreen';
@@ -20,6 +21,7 @@ function ItemCard({ item, imageUrl, onItemClick }: {
   onItemClick: (item: EmbyItem) => void;
 }) {
   const [isImageLoaded, setIsImageLoaded] = useState(false);
+  const versionCount = (item.AlternateVersions?.length ?? 0) + 1;
 
   return (
     <button
@@ -58,6 +60,16 @@ function ItemCard({ item, imageUrl, onItemClick }: {
             <svg className="w-16 h-16 opacity-30" fill="currentColor" viewBox="0 0 24 24">
               <path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/>
             </svg>
+          </div>
+        )}
+
+        {/* Multiple versions badge */}
+        {versionCount > 1 && (
+          <div className="absolute top-2 left-2 px-2 py-0.5 bg-purple-600/90 backdrop-blur-sm rounded text-xs font-medium text-white flex items-center gap-1">
+            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/>
+            </svg>
+            {versionCount}
           </div>
         )}
 
@@ -281,8 +293,11 @@ export function Browse() {
 
       const response = await embyApi.getItems(params);
       
+      // Deduplicate items that exist in multiple libraries
+      let deduplicatedItems = deduplicateItems(response.Items);
+      
       // Filter by season count client-side if needed (only for Series)
-      let filteredItems = response.Items;
+      let filteredItems = deduplicatedItems;
       if (mediaType === 'Series' && filters.seasonCounts.length > 0) {
         filteredItems = filteredItems.filter(item => {
           const childCount = (item as any).ChildCount;
@@ -390,7 +405,7 @@ export function Browse() {
   return (
     <div className={`min-h-screen bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950 transition-opacity duration-500 ${showContent ? 'opacity-100' : 'opacity-0'}`}>
       {/* Header */}
-      <header className="sticky top-0 z-40 bg-gray-950/95 backdrop-blur-sm border-b border-gray-800">
+      <header className="relative z-20 bg-gray-950 border-b border-gray-800">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center gap-4 mb-4">
             <button

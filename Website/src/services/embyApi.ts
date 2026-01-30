@@ -170,7 +170,7 @@ class EmbyApiService {
     if (params.groupItems) queryParams.append('GroupItems', 'true');
     if (params.parentId) queryParams.append('ParentId', params.parentId);
     // Include essential fields
-    queryParams.append('Fields', 'Genres,Overview,CommunityRating,OfficialRating,RunTimeTicks,ProductionYear,PremiereDate');
+    queryParams.append('Fields', 'Genres,Overview,CommunityRating,OfficialRating,RunTimeTicks,ProductionYear,PremiereDate,ProviderIds,Path,MediaSources');
 
     return this.request<any[]>(`/Users/${this.userId}/Items/Latest?${queryParams.toString()}`);
   }
@@ -214,7 +214,7 @@ class EmbyApiService {
     if (params.genres) queryParams.append('Genres', params.genres);
     if (params.years) queryParams.append('Years', params.years);
     // Always include essential fields for display
-    queryParams.append('Fields', params.fields || 'Genres,Overview,CommunityRating,OfficialRating,RunTimeTicks,ProductionYear,PremiereDate,Studios,ChildCount');
+    queryParams.append('Fields', params.fields || 'Genres,Overview,CommunityRating,OfficialRating,RunTimeTicks,ProductionYear,PremiereDate,Studios,ChildCount,ProviderIds,Path,MediaSources');
 
     const result = await this.request<ItemsResponse>(`/Users/${this.userId}/Items?${queryParams.toString()}`);
     

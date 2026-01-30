@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { embyApi } from '../services/embyApi';
 import type { EmbyItem } from '../types/emby.types';
 import { LoadingScreen } from './LoadingScreen';
+import { useTVNavigation } from '../hooks/useTVNavigation';
 
 interface WatchStats {
   totalMovies: number;
@@ -21,6 +22,8 @@ interface WatchStats {
 
 export function Stats() {
   const navigate = useNavigate();
+  // Enable DPAD navigation for this screen
+  useTVNavigation();
   const [stats, setStats] = useState<WatchStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -353,10 +356,17 @@ export function Stats() {
                   ? embyApi.getImageUrl(item.Id, 'Primary', { maxWidth: 200, tag: item.ImageTags.Primary })
                   : '';
                 return (
-                  <div
+                  <button
                     key={item.Id}
                     onClick={() => navigate(`/details/${item.Id}`)}
-                    className="cursor-pointer group"
+                    className="cursor-pointer group text-left focusable-card"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        navigate(`/details/${item.Id}`);
+                      }
+                    }}
                   >
                     <div className="relative aspect-[2/3] bg-gray-700 rounded-lg overflow-hidden mb-2">
                       {imageUrl ? (
@@ -378,7 +388,7 @@ export function Stats() {
                     {item.Type === 'Episode' && item.SeriesName && (
                       <p className="text-gray-500 text-xs truncate">{item.SeriesName}</p>
                     )}
-                  </div>
+                  </button>
                 );
               })}
             </div>

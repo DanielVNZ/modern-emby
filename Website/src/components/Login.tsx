@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { useAuth } from '../hooks/useAuth';
+import { useTVNavigation } from '../hooks/useTVNavigation';
 import type { LoginCredentials } from '../types/emby.types';
 
 export function Login() {
   const { login } = useAuth();
+  // Enable D-Pad navigation between form fields on TV
+  useTVNavigation();
   const [credentials, setCredentials] = useState<LoginCredentials>({
     serverUrl: localStorage.getItem('emby_server_url') || '',
     username: localStorage.getItem('emby_username') || '',

@@ -50,74 +50,51 @@ function EpisodeCard({
       }}
       tabIndex={0}
       role="button"
-      className="group bg-white/5 hover:bg-white/10 rounded-xl overflow-hidden cursor-pointer transition-all duration-200 focusable-card text-left"
+      className="group bg-white/5 hover:bg-white/10 rounded-xl overflow-hidden cursor-pointer transition-all duration-200 focusable-card text-left tv-episode-card"
     >
       {/* Thumbnail */}
       <div className="relative aspect-video bg-gray-800">
-        {thumbUrl ? (
-          <>
-            {/* Loading placeholder with pulse animation */}
-            {!isImageLoaded && (
-              <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-gray-700 to-gray-800" />
-            )}
-            <img
-              src={thumbUrl}
-              alt={episode.Name}
-              loading="lazy"
-              onLoad={() => setIsImageLoaded(true)}
-              className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${
-                isImageLoaded ? 'opacity-100' : 'opacity-0'
-              }`}
-              style={{
-                animation: isImageLoaded ? 'fadeInPulse 0.6s ease-out' : 'none'
-              }}
-            />
-          </>
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-gray-600 bg-gradient-to-br from-gray-800 to-gray-900">
-            <svg className="w-10 h-10 opacity-30" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/>
-            </svg>
-          </div>
-        )}
+        {/* Image container with overflow hidden for scale effect */}
+        <div className="absolute inset-0 overflow-hidden">
+          {thumbUrl ? (
+            <>
+              {/* Loading placeholder with pulse animation */}
+              {!isImageLoaded && (
+                <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-gray-700 to-gray-800" />
+              )}
+              <img
+                src={thumbUrl}
+                alt={episode.Name}
+                loading="lazy"
+                onLoad={() => setIsImageLoaded(true)}
+                className={`absolute inset-0 w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300 ${
+                  isImageLoaded ? 'opacity-100' : 'opacity-0'
+                }`}
+                style={{
+                  animation: isImageLoaded ? 'fadeInPulse 0.6s ease-out' : 'none'
+                }}
+              />
+            </>
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-gray-600 bg-gradient-to-br from-gray-800 to-gray-900">
+              <svg className="w-10 h-10 opacity-30" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/>
+              </svg>
+            </div>
+          )}
+        </div>
 
         {/* Episode number badge */}
-        <div className="absolute top-2 left-2 px-2 py-0.5 bg-black/70 backdrop-blur-sm rounded text-xs font-medium text-white">
+        <div className="absolute top-2 left-2 px-2 py-0.5 bg-black/70 backdrop-blur-sm rounded text-xs font-medium text-white z-10">
           E{episode.IndexNumber}
         </div>
 
         {/* Duration badge */}
         {episode.RunTimeTicks && (
-          <div className="absolute top-2 right-2 px-2 py-0.5 bg-black/70 backdrop-blur-sm rounded text-xs text-gray-300">
+          <div className="absolute top-2 right-2 px-2 py-0.5 bg-black/70 backdrop-blur-sm rounded text-xs text-gray-300 z-10">
             {formatRuntime(episode.RunTimeTicks)}
           </div>
         )}
-
-        {/* Watched indicator / Toggle button */}
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={handleToggleWatched}
-          disabled={isToggling}
-          tabIndex={-1}
-          className={`absolute bottom-2 right-2 w-6 h-6 rounded-full flex items-center justify-center transition-all duration-200 z-20 ${
-            isWatched 
-              ? 'bg-green-500 hover:bg-green-600' 
-              : 'bg-gray-700/80 hover:bg-gray-600'
-          } ${!isWatched && !isToggling ? 'opacity-0 group-hover:opacity-100 focus:opacity-100' : ''} ${isToggling ? 'animate-pulse opacity-100' : ''}`}
-          title={isWatched ? 'Mark as unwatched' : 'Mark as watched'}
-        >
-          {isToggling ? (
-            <svg className="w-3 h-3 text-white animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-          ) : (
-            <svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
-            </svg>
-          )}
-        </button>
 
         {/* Play overlay on hover */}
         <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center pointer-events-none">
@@ -140,13 +117,42 @@ function EpisodeCard({
       </div>
 
       {/* Info */}
-      <div className="p-3">
-        <h3 className="text-white font-medium text-sm line-clamp-1 group-hover:text-blue-400 transition-colors">
-          {episode.Name}
-        </h3>
-        {episode.Overview && (
-          <p className="text-gray-500 text-xs line-clamp-2 mt-1">{episode.Overview}</p>
-        )}
+      <div className="p-3 relative">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <h3 className="text-white font-medium text-sm line-clamp-1 group-hover:text-blue-400 transition-colors">
+              {episode.Name}
+            </h3>
+            {episode.Overview && (
+              <p className="text-gray-500 text-xs line-clamp-2 mt-1">{episode.Overview}</p>
+            )}
+          </div>
+          {/* Watched indicator / Toggle button */}
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={handleToggleWatched}
+            disabled={isToggling}
+            tabIndex={-1}
+            className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center transition-all duration-200 ${
+              isWatched 
+                ? 'bg-green-500 hover:bg-green-600' 
+                : 'bg-gray-700/80 hover:bg-gray-600'
+            } ${!isWatched && !isToggling ? 'opacity-0 group-hover:opacity-100 focus:opacity-100' : ''} ${isToggling ? 'animate-pulse opacity-100' : ''}`}
+            title={isWatched ? 'Mark as unwatched' : 'Mark as watched'}
+          >
+            {isToggling ? (
+              <svg className="w-3 h-3 text-white animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            ) : (
+              <svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+              </svg>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -171,6 +177,10 @@ export function MediaDetails() {
   const [canScrollSimilarLeft, setCanScrollSimilarLeft] = useState(false);
   const [canScrollSimilarRight, setCanScrollSimilarRight] = useState(true);
   const hasAutoSelectedSeasonRef = useRef(false);
+  const [isMarkingSeasonWatched, setIsMarkingSeasonWatched] = useState(false);
+  // TV layout now handled with CSS-only (no JS offsets)
+
+  // TV-specific spacing handled in CSS (tv-navigation.css)
 
   useEffect(() => {
     if (id) {
@@ -400,6 +410,40 @@ export function MediaDetails() {
     }
   };
 
+  const handleMarkSeasonWatched = async () => {
+    if (isMarkingSeasonWatched || episodes.length === 0) return;
+    
+    const allWatched = episodes.every(ep => ep.UserData?.Played);
+    setIsMarkingSeasonWatched(true);
+    
+    try {
+      // Mark all episodes in current season as watched or unwatched
+      await Promise.all(
+        episodes.map(async (episode) => {
+          if (allWatched) {
+            await embyApi.markUnplayed(episode.Id);
+          } else {
+            await embyApi.markPlayed(episode.Id);
+          }
+        })
+      );
+      
+      // Update UI state
+      setEpisodes(eps =>
+        eps.map(ep => ({
+          ...ep,
+          UserData: { ...ep.UserData, Played: !allWatched, PlaybackPositionTicks: 0 }
+        } as EmbyItem))
+      );
+    } catch (error) {
+      console.error('Failed to mark season as watched:', error);
+    } finally {
+      setIsMarkingSeasonWatched(false);
+    }
+  };
+
+  // (Removed) JS layout corrections; CSS now ensures non-overlapping sections on TV
+
   const formatRuntime = (ticks?: number) => {
     if (!ticks) return '';
     const minutes = Math.floor(ticks / 600000000);
@@ -425,7 +469,7 @@ export function MediaDetails() {
     : '';
 
   return (
-    <div className={`min-h-screen bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950 transition-opacity duration-500 ${showContent ? 'opacity-100' : 'opacity-0'}`}>
+    <div className={`min-h-screen bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950 transition-opacity duration-500 ${showContent ? 'opacity-100' : 'opacity-0'} media-details`}>
       {/* Fixed Background */}
       <div className="fixed inset-0 z-0">
         {backdropUrl && (
@@ -451,9 +495,9 @@ export function MediaDetails() {
       </button>
 
       {/* Hero Section */}
-      <div className="relative min-h-[70vh] z-10">
+      <div className="relative z-10 tv-hero pt-24">
         {/* Content */}
-        <div className="relative max-w-7xl mx-auto px-6 pt-24 pb-6 flex gap-10">
+        <div className="relative max-w-7xl mx-auto px-6 pb-6 flex gap-10">
           {/* Poster */}
           <div className="hidden md:block flex-shrink-0 w-72">
             <div className="aspect-[2/3] rounded-xl overflow-hidden shadow-2xl shadow-black/50 ring-1 ring-white/10">
@@ -613,12 +657,12 @@ export function MediaDetails() {
 
       {/* Seasons & Episodes for Series */}
       {item.Type === 'Series' && seasons.length > 0 && (
-        <div className="max-w-7xl mx-auto px-6 -mt-30 relative z-10">
+        <div className="max-w-7xl mx-auto px-6 relative z-20 media-episodes-section">
           {/* Season Selector - Dropdown style for many seasons, tabs for few */}
           <div className="flex items-center gap-4 mb-6">
             <h2 className="text-xl font-bold text-white">Episodes</h2>
             {seasons.length <= 5 ? (
-              <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
+              <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide season-tabs">
                 {seasons.map((season) => (
                   <button
                     key={season.Id}
@@ -654,10 +698,38 @@ export function MediaDetails() {
               </div>
             )}
             <span className="text-gray-500 text-sm">{episodes.length} episodes</span>
+            
+            {/* Mark Season Watched Button */}
+            <button
+              onClick={handleMarkSeasonWatched}
+              disabled={isMarkingSeasonWatched || episodes.length === 0}
+              className={`ml-auto px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200 focusable-tab flex items-center gap-2 ${
+                episodes.every(ep => ep.UserData?.Played)
+                  ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30 border border-green-500/30'
+                  : 'bg-white/10 text-gray-300 hover:bg-white/20 border border-white/10'
+              } ${isMarkingSeasonWatched ? 'opacity-50 cursor-wait' : ''}`}
+            >
+              {isMarkingSeasonWatched ? (
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                </svg>
+              )}
+              <span className="hidden sm:inline">
+                {episodes.every(ep => ep.UserData?.Played) ? 'Mark Season Unwatched' : 'Mark Season Watched'}
+              </span>
+              <span className="sm:hidden">
+                {episodes.every(ep => ep.UserData?.Played) ? 'Unwatched' : 'Watched'}
+              </span>
+            </button>
           </div>
 
           {/* Episodes - Compact Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 episodes-grid" role="list" aria-label="Episodes">
             {episodes.map((episode) => {
               const thumbUrl = episode.ImageTags?.Primary
                 ? embyApi.getImageUrl(episode.Id, 'Primary', { maxWidth: 400, tag: episode.ImageTags.Primary })
@@ -737,6 +809,7 @@ export function MediaDetails() {
                 }
               }}
               className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide"
+              role="list"
             >
             {similarItems.map((similarItem) => {
               const imageUrl = similarItem.ImageTags?.Primary
@@ -748,6 +821,7 @@ export function MediaDetails() {
                   key={similarItem.Id}
                   onClick={() => navigate(`/details/${similarItem.Id}`)}
                   className="flex-shrink-0 w-36 lg:w-44 group text-left focusable-card"
+                  role="listitem"
                 >
                   <div className="relative aspect-[2/3] bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl overflow-hidden mb-3 shadow-lg ring-1 ring-white/5">
                     {imageUrl ? (
