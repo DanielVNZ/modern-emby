@@ -1,8 +1,8 @@
-# Modern Emby
+# Aether
 
 A modern, sleek media player client for Emby servers. Built with React, TypeScript, Tailwind CSS, and Tauri for native desktop performance.
 
-![Modern Emby](https://img.shields.io/badge/Platform-Windows-blue) ![Android TV](https://img.shields.io/badge/Platform-Android%20TV-green) ![License](https://img.shields.io/badge/License-MIT-green)
+![Aether](https://img.shields.io/badge/Platform-Windows-blue) ![Android TV](https://img.shields.io/badge/Platform-Android%20TV-green) ![License](https://img.shields.io/badge/License-MIT-green)
 
 ## ✨ Features
 
@@ -69,9 +69,9 @@ npm run tauri build
 ```
 
 This will create:
-- **Installer (NSIS):** `src-tauri/target/release/bundle/nsis/Modern Emby_x.x.x_x64-setup.exe`
-- **MSI Installer:** `src-tauri/target/release/bundle/msi/Modern Emby_x.x.x_x64_en-US.msi`
-- **Standalone EXE:** `src-tauri/target/release/Modern Emby.exe`
+- **Installer (NSIS):** `src-tauri/target/release/bundle/nsis/Aether_x.x.x_x64-setup.exe`
+- **MSI Installer:** `src-tauri/target/release/bundle/msi/Aether_x.x.x_x64_en-US.msi`
+- **Standalone EXE:** `src-tauri/target/release/Aether.exe`
 
 ### Build Options
 

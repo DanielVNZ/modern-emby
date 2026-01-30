@@ -235,6 +235,7 @@ export function Home() {
   const [featuredItems, setFeaturedItems] = useState<EmbyItem[]>([]);
   const [featuredItem, setFeaturedItem] = useState<EmbyItem | null>(null);
   const [isImageFading, setIsImageFading] = useState(false);
+  const [showDonateModal, setShowDonateModal] = useState(false);
   const [showFeatured] = useState(() => {
     const saved = localStorage.getItem('emby_showFeatured');
     return saved !== null ? JSON.parse(saved) : true;
@@ -618,7 +619,7 @@ export function Home() {
       <header className="relative z-20 bg-gradient-to-b from-black/80 to-transparent">
         <div className="max-w-[1600px] mx-auto px-8 py-5 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <img src="/Logo.png" alt="Modern Emby" className="h-15 object-contain rounded-xl" />
+            <img src="/Logo.png" alt="Aether" className="h-20 object-contain rounded-xl" />
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -651,6 +652,16 @@ export function Home() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
               Settings
+            </button>
+            <button
+              onClick={() => setShowDonateModal(true)}
+              tabIndex={0}
+              className="px-5 py-2.5 text-base text-pink-300 hover:text-pink-200 hover:bg-pink-500/20 rounded-lg transition-all duration-200 flex items-center gap-2 focusable-item"
+            >
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+              </svg>
+              Donate
             </button>
             <button
               onClick={logout}
@@ -781,6 +792,67 @@ export function Home() {
           scrollbar-width: none;
         }
       `}</style>
+
+      {/* Donate Modal */}
+      {showDonateModal && (() => {
+        const isTV = /Android/i.test(navigator.userAgent);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
+            <div className="bg-gray-900/95 backdrop-blur-md rounded-2xl max-w-md w-full overflow-hidden border border-white/10 shadow-2xl">
+              {/* Header */}
+              <div className="p-6 text-center border-b border-white/10">
+                <div className="flex items-center justify-center gap-2 mb-2">
+                  <svg className="w-6 h-6 text-pink-400" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+                  </svg>
+                  <h2 className="text-2xl font-bold text-white">Support Aether</h2>
+                </div>
+                <p className="text-gray-400 text-sm">
+                  {isTV ? 'Scan the QR code with your phone' : 'Your support helps keep this project alive!'}
+                </p>
+              </div>
+
+              {/* Content */}
+              <div className="p-8 flex flex-col items-center">
+                {isTV ? (
+                  <>
+                    <div className="bg-white p-4 rounded-xl">
+                      <img 
+                        src="/qr-code.png" 
+                        alt="Donate QR Code" 
+                        className="w-48 h-48 object-contain"
+                      />
+                    </div>
+                    <p className="text-gray-500 text-sm mt-4">ko-fi.com/danielvnz</p>
+                  </>
+                ) : (
+                  <button 
+                    onClick={() => window.open('https://ko-fi.com/danielvnz', '_blank', 'noopener,noreferrer,width=700,height=800')}
+                    className="px-8 py-4 bg-pink-500 hover:bg-pink-600 text-white font-semibold rounded-xl transition-all duration-200 flex items-center gap-3 shadow-lg shadow-pink-500/25"
+                  >
+                    <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+                    </svg>
+                    Support on Ko-fi
+                  </button>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 border-t border-white/10">
+                <button
+                  onClick={() => setShowDonateModal(false)}
+                  autoFocus
+                  tabIndex={0}
+                  className="w-full px-4 py-3 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-all duration-200 font-medium focusable-item"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

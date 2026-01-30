@@ -40,7 +40,7 @@ export function Login() {
       <div className="max-w-md w-full">
         <div className="bg-dark-card rounded-lg shadow-xl p-8">
           <div className="flex justify-center mb-6">
-            <img src="/Logo.png" alt="Modern Emby" className="h-32 object-contain rounded-2xl" />
+            <img src="/Logo.png" alt="Aether" className="h-32 object-contain rounded-2xl" />
           </div>
           <h1 className="text-3xl font-bold text-white mb-2 text-center">
             Emby Web Client

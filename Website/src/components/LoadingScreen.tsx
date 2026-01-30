@@ -258,7 +258,7 @@ export function LoadingScreen({ message, isVisible = true }: LoadingScreenProps)
           {/* Main icon container */}
           <div className="relative rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-2xl shadow-blue-500/50 p-6">
             {/* Logo image */}
-            <img src="/Logo.png" alt="Modern Emby" className="h-40 object-contain animate-pulse rounded-2xl" />
+            <img src="/Logo.png" alt="Aether" className="h-40 object-contain animate-pulse rounded-2xl" />
           </div>
         </div>
         

@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Modern Emby",
+  "productName": "Aether",
   "version": "1.0.0",
-  "identifier": "com.modernemby.app",
+  "identifier": "com.aether.app",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Modern Emby",
+        "title": "Aether",
         "width": 1280,
         "height": 720,
         "minWidth": 1024,
