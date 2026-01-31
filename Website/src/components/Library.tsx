@@ -5,6 +5,17 @@ import { useTVNavigation } from '../hooks/useTVNavigation';
 import type { EmbyItem } from '../types/emby.types';
 import { LoadingScreen } from './LoadingScreen';
 
+// Helper to format date as "1 Jan 2026"
+const formatReleaseDate = (dateString?: string): string => {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return '';
+  const day = date.getDate();
+  const month = date.toLocaleDateString('en-US', { month: 'short' });
+  const year = date.getFullYear();
+  return `${day} ${month} ${year}`;
+};
+
 export function Library() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -175,7 +186,26 @@ export function Library() {
                     {item.Name}
                   </h3>
                   <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
-                    {item.ProductionYear && <span>{item.ProductionYear}</span>}
+                    {item.Type === 'Series' ? (
+                      <>
+                        {item.ChildCount && (
+                          <span>{item.ChildCount} Season{item.ChildCount !== 1 ? 's' : ''}</span>
+                        )}
+                        {item.PremiereDate && (
+                          <>
+                            {item.ChildCount && <span>·</span>}
+                            <span>{formatReleaseDate(item.PremiereDate)}</span>
+                          </>
+                        )}
+                      </>
+                    ) : item.Type === 'Episode' ? (
+                      <span>
+                        S{item.ParentIndexNumber || 1}E{item.IndexNumber || 1}
+                        {item.PremiereDate && ` · ${formatReleaseDate(item.PremiereDate)}`}
+                      </span>
+                    ) : (
+                      <>{item.ProductionYear && <span>{item.ProductionYear}</span>}</>
+                    )}
                     {item.OfficialRating && (
                       <span className="px-1.5 py-0.5 border border-gray-600 rounded">
                         {item.OfficialRating}

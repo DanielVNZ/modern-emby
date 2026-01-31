@@ -5,6 +5,17 @@ import { LoadingScreen } from './LoadingScreen';
 import { useTVNavigation } from '../hooks/useTVNavigation';
 import type { EmbyItem } from '../types/emby.types';
 
+// Helper to format date as "1 Jan 2026"
+const formatReleaseDate = (dateString?: string): string => {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return '';
+  const day = date.getDate();
+  const month = date.toLocaleDateString('en-US', { month: 'short' });
+  const year = date.getFullYear();
+  return `${day} ${month} ${year}`;
+};
+
 // Episode Card with image loading animation
 function EpisodeCard({ 
   episode, 
@@ -123,6 +134,10 @@ function EpisodeCard({
             <h3 className="text-white font-medium text-sm line-clamp-1 group-hover:text-blue-400 transition-colors">
               {episode.Name}
             </h3>
+            {/* Release date */}
+            {episode.PremiereDate && (
+              <p className="text-gray-400 text-xs mt-0.5">{formatReleaseDate(episode.PremiereDate)}</p>
+            )}
             {episode.Overview && (
               <p className="text-gray-500 text-xs line-clamp-2 mt-1">{episode.Overview}</p>
             )}
@@ -662,11 +677,18 @@ export function MediaDetails() {
           <div className="flex items-center gap-4 mb-6">
             <h2 className="text-xl font-bold text-white">Episodes</h2>
             {seasons.length <= 5 ? (
-              <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide season-tabs">
+              <div
+                className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide season-tabs"
+                role="list"
+                aria-label="Season selector"
+                data-tv-row
+              >
                 {seasons.map((season) => (
                   <button
                     key={season.Id}
                     onClick={() => setSelectedSeason(season.Id)}
+                    tabIndex={0}
+                    role="listitem"
                     className={`px-4 py-2 rounded-full font-medium whitespace-nowrap transition-all duration-200 text-sm focusable-tab ${
                       selectedSeason === season.Id
                         ? 'bg-white text-black'
@@ -849,8 +871,24 @@ export function MediaDetails() {
                     {similarItem.Name}
                   </h3>
                   <p className="text-gray-500 text-xs mt-1">
-                    {similarItem.ProductionYear}
-                    {similarItem.Type === 'Series' && ' • Series'}
+                    {similarItem.Type === 'Series' ? (
+                      <>
+                        {similarItem.ChildCount && `${similarItem.ChildCount} Season${similarItem.ChildCount !== 1 ? 's' : ''}`}
+                        {similarItem.PremiereDate && (
+                          <>
+                            {similarItem.ChildCount && ' · '}
+                            {formatReleaseDate(similarItem.PremiereDate)}
+                          </>
+                        )}
+                      </>
+                    ) : similarItem.Type === 'Episode' ? (
+                      <>
+                        S{similarItem.ParentIndexNumber || 1}E{similarItem.IndexNumber || 1}
+                        {similarItem.PremiereDate && ` · ${formatReleaseDate(similarItem.PremiereDate)}`}
+                      </>
+                    ) : (
+                      similarItem.ProductionYear
+                    )}
                   </p>
                 </button>
               );

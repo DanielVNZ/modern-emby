@@ -9,6 +9,7 @@ const Login = lazy(() => import('./components/Login').then(m => ({ default: m.Lo
 const Home = lazy(() => import('./components/Home').then(m => ({ default: m.Home })));
 const Library = lazy(() => import('./components/Library').then(m => ({ default: m.Library })));
 const Browse = lazy(() => import('./components/Browse').then(m => ({ default: m.Browse })));
+const PopularBrowse = lazy(() => import('./components/PopularBrowse').then(m => ({ default: m.PopularBrowse })));
 const MediaDetails = lazy(() => import('./components/MediaDetails').then(m => ({ default: m.MediaDetails })));
 const Player = lazy(() => import('./components/Player').then(m => ({ default: m.Player })));
 const Stats = lazy(() => import('./components/Stats').then(m => ({ default: m.Stats })));
@@ -86,6 +87,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <Settings />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/popular/:type"
+            element={
+              <ProtectedRoute>
+                <PopularBrowse />
               </ProtectedRoute>
             }
           />

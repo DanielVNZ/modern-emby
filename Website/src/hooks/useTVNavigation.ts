@@ -333,7 +333,7 @@ export function useTVNavigation(options: {
   }, [getFocusableElements]);
 
   // Focus an element and scroll it into view
-  const focusElement = useCallback((element: HTMLElement, direction?: 'up' | 'down' | 'left' | 'right') => {
+  const focusElement = useCallback((element: HTMLElement, direction?: 'up' | 'down' | 'left' | 'right', skipViewportScroll?: boolean) => {
     // Scroll into view FIRST, then focus
     // This ensures the element is visible before focus changes
     
@@ -360,7 +360,7 @@ export function useTVNavigation(options: {
     let parent = element.parentElement;
     let handledVerticalScroll = false;
     
-    while (parent) {
+    while (parent && !skipViewportScroll) {
       const style = window.getComputedStyle(parent);
       const isScrollableX = style.overflowX === 'auto' || style.overflowX === 'scroll';
       const isScrollableY = style.overflowY === 'auto' || style.overflowY === 'scroll';
@@ -406,7 +406,7 @@ export function useTVNavigation(options: {
     // and we haven't already handled scrolling in a scroll container
     // Skip vertical scroll adjustments for horizontal navigation in card rows
     // This prevents the viewport from jumping up/down when moving left/right
-    const shouldScrollVertically = !handledVerticalScroll && (!isInHorizontalRow || direction === 'up' || direction === 'down');
+    const shouldScrollVertically = !skipViewportScroll && !handledVerticalScroll && (!isInHorizontalRow || direction === 'up' || direction === 'down');
     
     if (shouldScrollVertically) {
       // Ensure the element is visible in the main viewport (vertical scrolling)
@@ -484,6 +484,12 @@ export function useTVNavigation(options: {
     if (!options.disableEnterKey && (e.key === 'Enter' || e.key === ' ')) {
       // Don't handle space in input fields
       if (isInInput && e.key === ' ') {
+        return;
+      }
+      
+      // Don't handle space bar if there's a video element on the page (player is active)
+      // Space should always control video playback, not navigation
+      if (e.key === ' ' && document.querySelector('video')) {
         return;
       }
       
@@ -576,14 +582,15 @@ export function useTVNavigation(options: {
       if (lastFocusedElement.current && document.contains(lastFocusedElement.current)) {
         const rect = lastFocusedElement.current.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0) {
-          focusElement(lastFocusedElement.current);
+          // Don't scroll viewport when auto-restoring focus
+          focusElement(lastFocusedElement.current, undefined, true);
           return;
         }
       }
       
-      // Otherwise focus the first element
+      // Otherwise focus the first element (without scrolling - this is auto-focus)
       if (elements.length > 0) {
-        focusElement(elements[0]);
+        focusElement(elements[0], undefined, true);
       }
     }
   }, [options.containerSelector, getFocusableElements, focusElement]);
@@ -698,18 +705,28 @@ export function usePlayerTVNavigation(options: {
 
     // Handle Enter/Space (OK button)
     if (e.key === 'Enter' || e.key === ' ') {
-      // If on a menu item or button, let it handle the click
-      if (activeElement && activeElement !== document.body) {
-        const isClickable = activeElement.tagName === 'BUTTON' ||
-                           activeElement.getAttribute('role') === 'button' ||
-                           activeElement.getAttribute('role') === 'menuitem';
-        
-        if (isClickable) {
-          e.preventDefault();
-          e.stopPropagation();
-          activeElement.click();
-          showControlsTemporarily();
-          return;
+      // Space bar should ONLY control video playback, never click buttons
+      if (e.key === ' ') {
+        // Let the Player component handle space bar for play/pause
+        // Don't click any focused elements
+        return;
+      }
+      
+      // Enter key can still click focused elements
+      if (e.key === 'Enter') {
+        // If on a menu item or button, let it handle the click
+        if (activeElement && activeElement !== document.body) {
+          const isClickable = activeElement.tagName === 'BUTTON' ||
+                             activeElement.getAttribute('role') === 'button' ||
+                             activeElement.getAttribute('role') === 'menuitem';
+          
+          if (isClickable) {
+            e.preventDefault();
+            e.stopPropagation();
+            activeElement.click();
+            showControlsTemporarily();
+            return;
+          }
         }
       }
       
@@ -734,10 +751,10 @@ export function usePlayerTVNavigation(options: {
         showControlsTemporarily();
         return;
       }
-      
-      // When controls are already visible, DON'T reset the hide timer for navigation
-      // This allows the controls to fade after 3 seconds of no activity
-      // The timer will only reset on actual playback actions (play/pause, seek, etc.)
+
+      // Controls are visible: reset the auto-hide timer on any DPAD navigation
+      // so UI won't disappear while the user is actively navigating.
+      showControlsTemporarily();
       // Don't prevent default - let the base useTVNavigation handle spatial navigation
     }
 

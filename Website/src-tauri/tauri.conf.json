@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Aether",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "identifier": "com.aether.app",
   "build": {
     "frontendDist": "../dist",
@@ -19,6 +19,7 @@
         "minHeight": 600,
         "resizable": true,
         "fullscreen": false,
+        "maximized": true,
         "center": true
       }
     ],
@@ -29,6 +30,10 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "DanielVNZ",
+    "copyright": "Copyright © 2026 DanielVNZ",
+    "shortDescription": "Aether - Media streaming client",
+    "longDescription": "Aether is a modern media streaming client for Emby servers.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -36,6 +41,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "windows": {
+      "certificateThumbprint": null,
+      "timestampUrl": null,
+      "nsis": {
+        "installerIcon": "icons/icon.ico"
+      }
+    },
     "android": {
       "minSdkVersion": 24
     }

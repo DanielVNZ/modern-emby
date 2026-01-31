@@ -6,6 +6,17 @@ import { useTVNavigation } from '../hooks/useTVNavigation';
 import type { EmbyItem } from '../types/emby.types';
 import { LoadingScreen } from './LoadingScreen';
 
+// Helper to format date as "1 Jan 2026"
+const formatReleaseDate = (dateString?: string): string => {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return '';
+  const day = date.getDate();
+  const month = date.toLocaleDateString('en-US', { month: 'short' });
+  const year = date.getFullYear();
+  return `${day} ${month} ${year}`;
+};
+
 interface FilterState {
   sortBy: string;
   sortOrder: string;
@@ -100,14 +111,27 @@ function ItemCard({ item, imageUrl, onItemClick }: {
           {item.Name}
         </h3>
         
-        {/* Year and Season Count */}
-        <div className="flex items-center gap-1.5 text-xs text-gray-500">
-          {item.ProductionYear && <span>{item.ProductionYear}</span>}
-          {item.Type === 'Series' && (item as any).ChildCount && (
+        {/* Year/Season count and release date */}
+        <div className="flex items-center gap-1.5 text-xs text-gray-500 flex-wrap">
+          {item.Type === 'Series' ? (
             <>
-              <span>•</span>
-              <span>{(item as any).ChildCount} Season{(item as any).ChildCount !== 1 ? 's' : ''}</span>
+              {item.ChildCount && (
+                <span>{item.ChildCount} Season{item.ChildCount !== 1 ? 's' : ''}</span>
+              )}
+              {item.PremiereDate && (
+                <>
+                  {item.ChildCount && <span>·</span>}
+                  <span>{formatReleaseDate(item.PremiereDate)}</span>
+                </>
+              )}
             </>
+          ) : item.Type === 'Episode' ? (
+            <span>
+              S{item.ParentIndexNumber || 1}E{item.IndexNumber || 1}
+              {item.PremiereDate && ` · ${formatReleaseDate(item.PremiereDate)}`}
+            </span>
+          ) : (
+            <>{item.ProductionYear && <span>{item.ProductionYear}</span>}</>
           )}
         </div>
         
@@ -271,6 +295,26 @@ export function Browse() {
     loadItems();
   };
 
+  // Fetch all items via pagination to avoid server-side page caps
+  const fetchAllItems = async (baseParams: any): Promise<EmbyItem[]> => {
+    const pageSize = 1000;
+    let startIndex = 0;
+    let all: EmbyItem[] = [];
+    while (true) {
+      const res = await embyApi.getItems({
+        ...baseParams,
+        startIndex,
+        limit: pageSize,
+      });
+      if (res.Items && res.Items.length) {
+        all = all.concat(res.Items as EmbyItem[]);
+      }
+      if (!res.Items || res.Items.length < pageSize) break;
+      startIndex += pageSize;
+    }
+    return all;
+  };
+
   const loadItems = async () => {
     try {
       setIsLoading(true);
@@ -280,7 +324,7 @@ export function Browse() {
         includeItemTypes: mediaType,
         sortBy: filters.sortBy,
         sortOrder: filters.sortOrder,
-        limit: 50000, // Increase limit to get all results
+        // limit intentionally small; we will paginate
       };
 
       if (filters.genres.length > 0) {
@@ -291,10 +335,11 @@ export function Browse() {
         params.years = filters.years.join(',');
       }
 
-      const response = await embyApi.getItems(params);
+      // Fetch all pages to ensure we truly have everything
+      const allItems = await fetchAllItems(params);
       
       // Deduplicate items that exist in multiple libraries
-      let deduplicatedItems = deduplicateItems(response.Items);
+      let deduplicatedItems = deduplicateItems(allItems);
       
       // Filter by season count client-side if needed (only for Series)
       let filteredItems = deduplicatedItems;
@@ -307,6 +352,18 @@ export function Browse() {
         });
       }
       
+      // If user entered a search term, also ask server to search (more robust)
+      if (searchTerm.trim().length > 0) {
+        const searchItems = await fetchAllItems({
+          recursive: true,
+          includeItemTypes: mediaType,
+          searchTerm: searchTerm.trim(),
+          sortBy: filters.sortBy,
+          sortOrder: filters.sortOrder,
+        });
+        filteredItems = deduplicateItems([...filteredItems, ...searchItems]);
+      }
+
       setItems(filteredItems);
     } catch (error) {
       console.error('Failed to load items:', error);
@@ -322,17 +379,16 @@ export function Browse() {
       setGenres(genresResponse.Items.map(g => g.Name));
 
       // Get all items to extract unique years and season counts
-      const response = await embyApi.getItems({
+      const responseItems = await fetchAllItems({
         recursive: true,
         includeItemTypes: mediaType,
         fields: 'ProductionYear,ChildCount',
-        limit: 50000, // Increase limit to get all results
       });
 
       // Extract unique years
       const allYears = new Set<number>();
       const allSeasonCounts = new Set<number>();
-      response.Items.forEach(item => {
+      responseItems.forEach(item => {
         if (item.ProductionYear) {
           allYears.add(item.ProductionYear);
         }

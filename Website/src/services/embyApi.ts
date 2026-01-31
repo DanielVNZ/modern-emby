@@ -188,6 +188,7 @@ class EmbyApiService {
     genres?: string;
     years?: string;
     fields?: string;
+    anyProviderIdEquals?: string;
   } = {}): Promise<ItemsResponse> {
     // Don't cache resume/continue watching or recently played items - they need to be fresh
     const isResumeOrPlayedQuery = params.filters?.includes('IsResumable') || params.filters?.includes('IsPlayed');
@@ -213,6 +214,7 @@ class EmbyApiService {
     if (params.searchTerm) queryParams.append('SearchTerm', params.searchTerm);
     if (params.genres) queryParams.append('Genres', params.genres);
     if (params.years) queryParams.append('Years', params.years);
+    if (params.anyProviderIdEquals) queryParams.append('AnyProviderIdEquals', params.anyProviderIdEquals);
     // Always include essential fields for display
     queryParams.append('Fields', params.fields || 'Genres,Overview,CommunityRating,OfficialRating,RunTimeTicks,ProductionYear,PremiereDate,Studios,ChildCount,ProviderIds,Path,MediaSources');
 

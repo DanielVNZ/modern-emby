@@ -85,6 +85,8 @@ export interface EmbyItem {
   Genres?: string[];
   Studios?: { Name: string; Id?: string }[];
   PremiereDate?: string;
+  // Season count for Series items
+  ChildCount?: number;
   UserData?: {
     PlaybackPositionTicks: number;
     PlayCount: number;

@@ -1,4 +1,4 @@
-package com.modernemby.app
+package com.aether.app
 
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge

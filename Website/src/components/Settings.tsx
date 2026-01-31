@@ -37,6 +37,10 @@ export function Settings() {
   const [preferredAudioLang, setPreferredAudioLang] = useState<string>(() => {
     return localStorage.getItem('emby_preferredAudioLang') || '';
   });
+  const [tmdbApiKey, setTmdbApiKey] = useState<string>(() => {
+    return localStorage.getItem('tmdb_apiKey') || '';
+  });
+  const [showTmdbKey, setShowTmdbKey] = useState(false);
   const [availableGenres, setAvailableGenres] = useState<string[]>([]);
   const [availableYears, setAvailableYears] = useState<number[]>([]);
 
@@ -238,6 +242,97 @@ export function Settings() {
                 </div>
               </>
             )}
+          </div>
+        </section>
+
+        {/* TMDB Recommendations Section */}
+        <section className="mb-10">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-xl bg-green-600/20 flex items-center justify-center">
+              <svg className="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+              </svg>
+            </div>
+            <h2 className="text-xl font-semibold text-white">Recommendations</h2>
+          </div>
+
+          <div className="bg-gray-900/50 rounded-2xl border border-gray-800 overflow-hidden">
+            <div className="p-5">
+              <label className="block text-white font-medium mb-1">TMDB API Key</label>
+              <p className="text-sm text-gray-500 mb-4">
+                Enable popular movie & TV show recommendations on your home screen. 
+                Get your free API key from{' '}
+                <a 
+                  href="https://www.themoviedb.org/settings/api" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-green-400 hover:text-green-300 underline focusable-tab"
+                  tabIndex={0}
+                >
+                  themoviedb.org
+                </a>
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <div className="relative flex-1">
+                  <input
+                    type={showTmdbKey ? 'text' : 'password'}
+                    value={tmdbApiKey}
+                    onChange={(e) => {
+                      setTmdbApiKey(e.target.value);
+                      localStorage.setItem('tmdb_apiKey', e.target.value);
+                      // If key is cleared, also clear any cached TMDB popular lists
+                      if (!e.target.value || e.target.value.trim().length === 0) {
+                        sessionStorage.removeItem('popular_movies_all');
+                        sessionStorage.removeItem('popular_tv_all');
+                      }
+                    }}
+                    placeholder="Paste your TMDB API key here"
+                    className="w-full px-4 py-3 pr-12 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-green-500 focusable-tab font-mono text-sm"
+                  />
+                  <button
+                    onClick={() => setShowTmdbKey(!showTmdbKey)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors focusable-tab p-1 rounded"
+                    tabIndex={0}
+                    aria-label={showTmdbKey ? 'Hide API key' : 'Show API key'}
+                  >
+                    {showTmdbKey ? (
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                      </svg>
+                    ) : (
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                {tmdbApiKey && (
+                  <button
+                    onClick={() => {
+                      setTmdbApiKey('');
+                      localStorage.removeItem('tmdb_apiKey');
+                      // Clear any cached TMDB popular lists immediately
+                      sessionStorage.removeItem('popular_movies_all');
+                      sessionStorage.removeItem('popular_tv_all');
+                    }}
+                    className="px-4 py-3 bg-red-600/20 hover:bg-red-600/30 text-red-400 font-medium rounded-xl transition-colors focusable-tab flex items-center justify-center gap-2"
+                    tabIndex={0}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Clear
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-gray-600 mt-3 flex items-center gap-2">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Tip: Copy and paste your API key to avoid typos
+              </p>
+            </div>
           </div>
         </section>
 

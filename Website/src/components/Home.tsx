@@ -1,11 +1,23 @@
 import { useState, useEffect, useRef, memo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { embyApi } from '../services/embyApi';
+import { tmdbApi } from '../services/tmdbApi';
 import { deduplicateItems } from '../services/deduplication';
 import { useAuth } from '../hooks/useAuth';
 import { useTVNavigation } from '../hooks/useTVNavigation';
 import type { EmbyItem } from '../types/emby.types';
 import { LoadingScreen } from './LoadingScreen';
+
+// Helper to format date as "1 Jan 2026"
+const formatReleaseDate = (dateString?: string): string => {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return '';
+  const day = date.getDate();
+  const month = date.toLocaleDateString('en-US', { month: 'short' });
+  const year = date.getFullYear();
+  return `${day} ${month} ${year}`;
+};
 
 // MediaCard component - defined outside Home to prevent recreation on re-renders
 const MediaCard = memo(({ item, size = 'normal', onItemClick }: { item: EmbyItem; size?: 'normal' | 'large'; onItemClick: (item: EmbyItem) => void }) => {
@@ -80,18 +92,31 @@ const MediaCard = memo(({ item, size = 'normal', onItemClick }: { item: EmbyItem
         <h3 className="text-white font-semibold text-sm line-clamp-1 group-hover/card:text-blue-400 transition-colors">
           {item.Type === 'Episode' ? item.SeriesName || item.Name : item.Name}
         </h3>
-        <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-0.5">
-          {item.ProductionYear && <span>{item.ProductionYear}</span>}
-          {item.OfficialRating && (
-            <span className="px-1.5 py-0.5 bg-gray-800 border border-gray-700 rounded text-gray-300 text-[11px] font-medium">
-              {item.OfficialRating}
+        <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-0.5 flex-wrap">
+          {/* Episode details: S1E1 · 1 Jan 2026 */}
+          {item.Type === 'Episode' && (
+            <span className="text-blue-400 font-medium text-xs">
+              S{item.ParentIndexNumber || 1}E{item.IndexNumber || 1}
+              {item.PremiereDate && ` · ${formatReleaseDate(item.PremiereDate)}`}
             </span>
           )}
-          {/* Episode details for Continue Watching */}
-          {item.Type === 'Episode' && (
-            <span className="text-blue-400 font-semibold text-xs">
-              S{item.ParentIndexNumber || 1}E{item.IndexNumber || 1}
+          {/* Series: X Seasons · last episode date */}
+          {item.Type === 'Series' && (
+            <span className="text-gray-400 text-xs">
+              {item.ChildCount && `${item.ChildCount} Season${item.ChildCount !== 1 ? 's' : ''}`}
+              {item.PremiereDate && ` · ${formatReleaseDate(item.PremiereDate)}`}
             </span>
+          )}
+          {/* Movies: just year and rating */}
+          {item.Type === 'Movie' && (
+            <>
+              {item.ProductionYear && <span>{item.ProductionYear}</span>}
+              {item.OfficialRating && (
+                <span className="px-1.5 py-0.5 bg-gray-800 border border-gray-700 rounded text-gray-300 text-[11px] font-medium">
+                  {item.OfficialRating}
+                </span>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -103,11 +128,12 @@ const MediaCard = memo(({ item, size = 'normal', onItemClick }: { item: EmbyItem
 });
 
 // MediaRow component - defined outside Home
-const MediaRow = memo(({ title, items, icon, browseLink, onItemClick, onBrowseClick }: { 
+const MediaRow = memo(({ title, items, icon, browseLink, subtitle, onItemClick, onBrowseClick }: { 
   title: string; 
   items: EmbyItem[]; 
   icon?: React.ReactNode; 
   browseLink?: string;
+  subtitle?: string;
   onItemClick: (item: EmbyItem) => void;
   onBrowseClick?: (link: string) => void;
 }) => {
@@ -149,6 +175,7 @@ const MediaRow = memo(({ title, items, icon, browseLink, onItemClick, onBrowseCl
       <div className="flex items-center gap-4 mb-6">
         {icon && <div className="text-blue-500">{icon}</div>}
         <h2 className="text-2xl font-bold text-white">{title}</h2>
+        {subtitle && <span className="text-xs text-gray-500 ml-1">{subtitle}</span>}
         <div className="flex-1 h-px bg-gradient-to-r from-gray-800 to-transparent ml-6" />
         {browseLink && onBrowseClick && (
           <button
@@ -206,8 +233,8 @@ const MediaRow = memo(({ title, items, icon, browseLink, onItemClick, onBrowseCl
           role="list"
           aria-label={title}
         >
-          {items.map((item) => (
-            <MediaCard key={item.Id} item={item} onItemClick={onItemClick} />
+          {items.map((item, index) => (
+            <MediaCard key={`${item.Id}-${index}`} item={item} onItemClick={onItemClick} />
           ))}
           {/* Spacer to ensure last item isn't cut off */}
           <div className="flex-shrink-0 w-1" />
@@ -250,14 +277,18 @@ export function Home() {
     const saved = localStorage.getItem('emby_featuredMediaType');
     return saved ? JSON.parse(saved) : { movies: true, tvShows: true };
   });
+  const [popularMovies, setPopularMovies] = useState<EmbyItem[]>([]);
+  const [popularTVShows, setPopularTVShows] = useState<EmbyItem[]>([]);
 
   // Load cached data from sessionStorage immediately on mount
   useEffect(() => {
     const cachedMovies = sessionStorage.getItem('home_latestMovies');
     const cachedEpisodes = sessionStorage.getItem('home_latestEpisodes');
-    
+    const cachedPopularMovies = sessionStorage.getItem('popular_movies_all');
+    const cachedPopularTV = sessionStorage.getItem('popular_tv_all');
+
     let hasCache = false;
-    
+
     if (cachedMovies) {
       try {
         setLatestMovies(JSON.parse(cachedMovies));
@@ -266,7 +297,7 @@ export function Home() {
         console.error('Failed to parse cached movies:', e);
       }
     }
-    
+
     if (cachedEpisodes) {
       try {
         setLatestEpisodes(JSON.parse(cachedEpisodes));
@@ -275,7 +306,35 @@ export function Home() {
         console.error('Failed to parse cached episodes:', e);
       }
     }
-    
+
+    // Only use cached TMDB-popular rows if an API key is configured; otherwise clear any stale cache
+    if (tmdbApi.isConfigured()) {
+      if (cachedPopularMovies) {
+        try {
+          const all = JSON.parse(cachedPopularMovies) as EmbyItem[];
+          setPopularMovies(all.slice(0, 15));
+          hasCache = true;
+        } catch (e) {
+          console.error('Failed to parse cached popular movies:', e);
+        }
+      }
+      if (cachedPopularTV) {
+        try {
+          const all = JSON.parse(cachedPopularTV) as EmbyItem[];
+          setPopularTVShows(all.slice(0, 15));
+          hasCache = true;
+        } catch (e) {
+          console.error('Failed to parse cached popular TV:', e);
+        }
+      }
+    } else {
+      // No API key: ensure popular sections are cleared and cache removed
+      setPopularMovies([]);
+      setPopularTVShows([]);
+      sessionStorage.removeItem('popular_movies_all');
+      sessionStorage.removeItem('popular_tv_all');
+    }
+
     // If we have cached data, hide loading immediately
     if (hasCache) {
       setIsInitialLoad(false);
@@ -291,10 +350,6 @@ export function Home() {
     if (featuredItems.length <= 1) return;
 
     const interval = setInterval(() => {
-      // Store current scroll position
-      const scrollY = window.scrollY;
-      const activeElement = document.activeElement;
-      
       setIsImageFading(true);
       
       setTimeout(() => {
@@ -305,14 +360,6 @@ export function Home() {
           return featuredItems[nextIndex];
         });
         setIsImageFading(false);
-        
-        // Restore scroll position and focus after state update
-        requestAnimationFrame(() => {
-          window.scrollTo(0, scrollY);
-          if (activeElement && activeElement !== document.body && 'focus' in activeElement) {
-            (activeElement as HTMLElement).focus();
-          }
-        });
       }, 500);
     }, 10000);
 
@@ -377,11 +424,19 @@ export function Home() {
       // Deduplicate movies that exist in multiple libraries
       const deduplicatedMovies = deduplicateItems(movies.Items);
       setLatestMovies(deduplicatedMovies);
-      setLatestEpisodes(episodes.Items);
+      
+      // Deduplicate episodes by ID (same episode can appear from different library sources)
+      const seenEpisodeIds = new Set<string>();
+      const uniqueEpisodes = episodes.Items.filter(ep => {
+        if (seenEpisodeIds.has(ep.Id)) return false;
+        seenEpisodeIds.add(ep.Id);
+        return true;
+      });
+      setLatestEpisodes(uniqueEpisodes);
       
       // Cache movies and episodes in sessionStorage for instant loading on return
       sessionStorage.setItem('home_latestMovies', JSON.stringify(deduplicatedMovies));
-      sessionStorage.setItem('home_latestEpisodes', JSON.stringify(episodes.Items));
+      sessionStorage.setItem('home_latestEpisodes', JSON.stringify(uniqueEpisodes));
       
       // Build a map of series ID -> most recent LastPlayedDate from recently played episodes
       const seriesLastPlayedMap = new Map<string, string>();
@@ -509,13 +564,24 @@ export function Home() {
       const seriesNextUpResults = await Promise.all(seriesEpisodesPromises);
       const processedEpisodes: EmbyItem[] = seriesNextUpResults.filter((ep): ep is EmbyItem => ep !== null);
       
+      // Deduplicate processedEpisodes by ID
+      const seenSeriesEpIds = new Set<string>();
+      const uniqueProcessedEpisodes = processedEpisodes.filter(ep => {
+        if (seenSeriesEpIds.has(ep.Id)) return false;
+        seenSeriesEpIds.add(ep.Id);
+        return true;
+      });
+      
       // Movies are already sorted by DatePlayed from API, deduplicate them
       // Set separate states for movies and series
       setResumeMovies(deduplicateItems(resumeMovies.Items));
-      setResumeSeries(processedEpisodes);
+      setResumeSeries(uniqueProcessedEpisodes);
       
       // Load featured items in parallel, don't wait for it
       loadFeaturedItems();
+      
+      // Load TMDB popular content if API key is configured
+      loadPopularContent();
       
       // Mark initial load as complete immediately after essential content is ready
       setIsInitialLoad(false);
@@ -565,6 +631,89 @@ export function Home() {
       }
     } catch (error) {
       console.error('Failed to load featured items:', error);
+    }
+  };
+
+  const loadPopularContent = async () => {
+    // Check if TMDB API is configured
+    if (!tmdbApi.isConfigured()) {
+      // Ensure stale data is cleared when key is missing
+      setPopularMovies([]);
+      setPopularTVShows([]);
+      sessionStorage.removeItem('popular_movies_all');
+      sessionStorage.removeItem('popular_tv_all');
+      return;
+    }
+
+    try {
+      // Fetch trending movies + popular TV shows from TMDB (5 pages = 100 items each) + library items in parallel
+      const [tmdbMovies, tmdbShows, libraryMovies, librarySeries] = await Promise.all([
+        tmdbApi.getTrendingMoviesMultiPage(5),
+        tmdbApi.getPopularTVShowsMultiPage(5),
+        embyApi.getItems({
+          recursive: true,
+          includeItemTypes: 'Movie',
+          fields: 'ProviderIds,ProductionYear,PremiereDate,OfficialRating,CommunityRating,ChildCount',
+        }),
+        embyApi.getItems({
+          recursive: true,
+          includeItemTypes: 'Series',
+          fields: 'ProviderIds,ProductionYear,PremiereDate,OfficialRating,CommunityRating,ChildCount',
+        }),
+      ]);
+
+      // Helper to extract TMDB id from various possible ProviderIds keys
+      const extractTmdbId = (providerIds?: Record<string, string>): string | null => {
+        if (!providerIds) return null;
+        for (const [k, v] of Object.entries(providerIds)) {
+          const key = k.toLowerCase();
+          // Check for any variation of tmdb key
+          if (key.includes('tmdb') || key === 'themoviedb') {
+            if (v != null && v !== '') return String(v);
+          }
+        }
+        return null;
+      };
+
+      // Create lookup maps by TMDB ID for fast matching (case-insensitive provider keys)
+      const moviesByTmdbId = new Map<string, typeof libraryMovies.Items[0]>();
+      for (const movie of libraryMovies.Items) {
+        const id = extractTmdbId(movie.ProviderIds as any);
+        if (id) moviesByTmdbId.set(String(id), movie);
+      }
+
+      const seriesByTmdbId = new Map<string, typeof librarySeries.Items[0]>();
+      for (const series of librarySeries.Items) {
+        const id = extractTmdbId(series.ProviderIds as any);
+        if (id) seriesByTmdbId.set(String(id), series);
+      }
+
+      // Match TMDB items with library items, preserving TMDB popularity order
+      const orderedMovies: EmbyItem[] = [];
+      for (const tmdbMovie of tmdbMovies) {
+        const match = moviesByTmdbId.get(String(tmdbMovie.id));
+        if (match && !orderedMovies.some(x => x.Id === match.Id)) {
+          orderedMovies.push(match as EmbyItem);
+        }
+      }
+
+      const orderedShows: EmbyItem[] = [];
+      for (const tmdbShow of tmdbShows) {
+        const match = seriesByTmdbId.get(String(tmdbShow.id));
+        if (match && !orderedShows.some(x => x.Id === match.Id)) {
+          orderedShows.push(match as EmbyItem);
+        }
+      }
+
+      // Store all matches in sessionStorage for the "See All" pages
+      sessionStorage.setItem('popular_movies_all', JSON.stringify(orderedMovies));
+      sessionStorage.setItem('popular_tv_all', JSON.stringify(orderedShows));
+
+      // Only show first 15 on home page
+      setPopularMovies(orderedMovies.slice(0, 15));
+      setPopularTVShows(orderedShows.slice(0, 15));
+    } catch (error) {
+      console.error('Failed to load popular content from TMDB:', error);
     }
   };
 
@@ -679,37 +828,37 @@ export function Home() {
 
       {/* Hero Section */}
       {showFeatured && featuredItem && (
-        <div className="relative h-[80vh] min-h-[560px] overflow-hidden z-10 tv-hero home-hero">
+        <div className="relative h-[80vh] sm:h-[70vh] md:h-[80vh] min-h-[400px] sm:min-h-[450px] md:min-h-[560px] overflow-hidden z-10 tv-hero home-hero">
           {/* Hero Content */}
-          <div className="relative h-full max-w-[1600px] mx-auto px-8 flex items-center">
-            <div className="max-w-3xl pt-20">
-              <div className="flex items-center gap-4 mb-5">
-                <span className="px-3 py-1 bg-blue-500/20 text-blue-400 text-xs font-semibold rounded-full border border-blue-500/30">
+          <div className="relative h-full max-w-[1600px] mx-auto px-4 sm:px-6 md:px-8 flex items-center">
+            <div className="max-w-3xl pt-16 sm:pt-20">
+              <div className="flex items-center gap-2 sm:gap-4 mb-3 sm:mb-5">
+                <span className="px-2 sm:px-3 py-1 bg-blue-500/20 text-blue-400 text-xs font-semibold rounded-full border border-blue-500/30">
                   Featured
                 </span>
                 {featuredItem.OfficialRating && (
-                  <span className="px-2 py-1 bg-white/10 text-gray-300 text-xs font-medium rounded border border-white/20">
+                  <span className="px-1.5 sm:px-2 py-1 bg-white/10 text-gray-300 text-xs font-medium rounded border border-white/20">
                     {featuredItem.OfficialRating}
                   </span>
                 )}
                 {featuredItem.ProductionYear && (
-                  <span className="text-gray-400 text-sm">{featuredItem.ProductionYear}</span>
+                  <span className="text-gray-400 text-xs sm:text-sm">{featuredItem.ProductionYear}</span>
                 )}
               </div>
               
-              <h2 className="text-6xl font-bold text-white mb-5 leading-tight tv-hero-title">{featuredItem.Name}</h2>
+              <h2 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-3 sm:mb-5 leading-tight tv-hero-title">{featuredItem.Name}</h2>
               
               {featuredItem.Overview && (
-                <p className="text-gray-200 text-xl leading-relaxed mb-8 line-clamp-3 tv-hero-overview">{featuredItem.Overview}</p>
+                <p className="text-gray-200 text-sm sm:text-lg md:text-xl leading-relaxed mb-4 sm:mb-6 md:mb-8 line-clamp-2 sm:line-clamp-3 tv-hero-overview">{featuredItem.Overview}</p>
               )}
               
-              <div className="flex items-center gap-5">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-5">
                 <button
                   onClick={() => navigate(`/player/${featuredItem.Id}`)}
                   tabIndex={0}
-                  className="px-10 py-4 bg-white text-black text-lg font-semibold rounded-xl hover:bg-gray-200 transition-all duration-200 flex items-center gap-3 shadow-2xl shadow-white/10 primary-action focusable-item"
+                  className="px-6 sm:px-8 md:px-10 py-3 sm:py-3.5 md:py-4 bg-white text-black text-sm sm:text-base md:text-lg font-semibold rounded-xl hover:bg-gray-200 transition-all duration-200 flex items-center gap-2 sm:gap-3 shadow-2xl shadow-white/10 primary-action focusable-item"
                 >
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M8 5v14l11-7z"/>
                   </svg>
                   Play Now
@@ -717,7 +866,7 @@ export function Home() {
                 <button 
                   onClick={() => navigate(`/details/${featuredItem.Id}`)}
                   tabIndex={0}
-                  className="px-8 py-3.5 bg-white/10 text-white text-lg font-medium rounded-xl hover:bg-white/20 transition-all duration-200 backdrop-blur-sm border border-white/10 focusable-item"
+                  className="px-5 sm:px-6 md:px-8 py-2.5 sm:py-3 md:py-3.5 bg-white/10 text-white text-sm sm:text-base md:text-lg font-medium rounded-xl hover:bg-white/20 transition-all duration-200 backdrop-blur-sm border border-white/10 focusable-item"
                 >
                   More Info
                 </button>
@@ -728,7 +877,7 @@ export function Home() {
       )}
 
       {/* Main Content */}
-      <main className={`max-w-[1600px] mx-auto px-8 home-main ${showFeatured && featuredItem ? '-mt-28 relative z-10' : 'pt-28'}`}>
+      <main className={`max-w-[1600px] mx-auto px-4 sm:px-6 md:px-8 home-main ${showFeatured && featuredItem ? '-mt-8 sm:-mt-16 md:-mt-28 relative z-10' : 'pt-16 sm:pt-20 md:pt-28'}`}>
         {/* Content Rows */}
         <MediaRow
           title="Continue Watching Movies"
@@ -754,6 +903,36 @@ export function Home() {
             </svg>
           }
         />
+        {popularMovies.length > 0 && (
+          <MediaRow
+            title="Trending Movies"
+            items={popularMovies}
+            browseLink="/popular/movies"
+            subtitle="Powered by TMDB"
+            onItemClick={handleItemClick}
+            onBrowseClick={handleBrowseClick}
+            icon={
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+              </svg>
+            }
+          />
+        )}
+        {popularTVShows.length > 0 && (
+          <MediaRow
+            title="Popular TV Shows"
+            items={popularTVShows}
+            browseLink="/popular/tv"
+            subtitle="Powered by TMDB"
+            onItemClick={handleItemClick}
+            onBrowseClick={handleBrowseClick}
+            icon={
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+              </svg>
+            }
+          />
+        )}
         <MediaRow
           title="Latest Movies"
           items={latestMovies}
@@ -780,8 +959,17 @@ export function Home() {
         />
       </main>
 
-      {/* Footer Spacing */}
-      <div className="h-12" />
+      {/* Footer */}
+      <footer className="relative z-10 border-t border-white/10 mt-8 py-8 px-6">
+        <div className="max-w-7xl mx-auto text-center">
+          <p className="text-gray-500 text-sm">
+            © Aether 2026
+          </p>
+          <p className="text-gray-600 text-xs mt-2 max-w-md mx-auto">
+            Dates shown for TV Series reflect the show's original release date. Popular/Trending lists show the premiere date from your library metadata.
+          </p>
+        </div>
+      </footer>
 
       <style>{`
         .scrollbar-hide::-webkit-scrollbar {

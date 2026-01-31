@@ -355,6 +355,118 @@ body.tv-device .media-details .tv-episode-card .aspect-video img {
 }
 
 /* ================================
+   SMALL SCREEN / WINDOW RESPONSIVE FIXES
+   ================================ */
+
+/* On smaller screens, reduce the hero section height to prevent overlap */
+@media (max-height: 700px) {
+  .home-hero.tv-hero {
+    height: 60vh !important;
+    min-height: 400px !important;
+  }
+  
+  .home-hero .tv-hero-title {
+    font-size: clamp(1.5rem, 4vw, 2.5rem) !important;
+    margin-bottom: 0.5rem !important;
+  }
+  
+  .home-hero .tv-hero-overview {
+    font-size: 0.9rem !important;
+    line-height: 1.4 !important;
+    -webkit-line-clamp: 2 !important;
+    line-clamp: 2 !important;
+    margin-bottom: 1rem !important;
+  }
+  
+  /* Reduce negative margin on main content */
+  .home-main {
+    margin-top: -1rem !important;
+  }
+  
+  /* Smaller buttons on hero */
+  .home-hero .primary-action {
+    padding: 0.625rem 1.5rem !important;
+    font-size: 0.95rem !important;
+  }
+}
+
+/* Extra small screens - even tighter spacing */
+@media (max-height: 550px) {
+  .home-hero.tv-hero {
+    height: 50vh !important;
+    min-height: 320px !important;
+  }
+  
+  .home-hero .tv-hero-title {
+    font-size: clamp(1.25rem, 3.5vw, 2rem) !important;
+  }
+  
+  .home-hero .tv-hero-overview {
+    display: none !important;
+  }
+  
+  .home-main {
+    margin-top: 0 !important;
+    padding-top: 0.75rem !important;
+  }
+}
+
+/* Small width screens (narrow windows) */
+@media (max-width: 768px) {
+  .home-hero.tv-hero {
+    height: auto !important;
+    min-height: 350px !important;
+    padding-bottom: 2rem !important;
+  }
+  
+  .home-hero .tv-hero-title {
+    font-size: clamp(1.5rem, 5vw, 2.5rem) !important;
+  }
+  
+  .home-hero .tv-hero-overview {
+    font-size: 0.9rem !important;
+    -webkit-line-clamp: 2 !important;
+    line-clamp: 2 !important;
+    margin-bottom: 1rem !important;
+  }
+  
+  /* Stack buttons on very small screens */
+  .home-hero .flex.items-center.gap-5 {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem !important;
+  }
+  
+  .home-hero .primary-action {
+    padding: 0.625rem 1.25rem !important;
+    font-size: 0.9rem !important;
+  }
+  
+  .home-main {
+    margin-top: 0 !important;
+    padding-top: 1rem !important;
+  }
+}
+
+/* Combined small height AND width */
+@media (max-height: 600px) and (max-width: 900px) {
+  .home-hero.tv-hero {
+    height: auto !important;
+    min-height: 280px !important;
+    padding-bottom: 1rem !important;
+  }
+  
+  .home-hero .tv-hero-overview {
+    display: none !important;
+  }
+  
+  .home-main {
+    margin-top: 0 !important;
+    padding-top: 0.5rem !important;
+  }
+}
+
+/* ================================
    SETTINGS MODAL TV STYLES
    ================================ */
 

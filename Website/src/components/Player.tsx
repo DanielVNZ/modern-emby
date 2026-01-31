@@ -441,6 +441,34 @@ export function Player() {
     }
   };
 
+  // On TV/remotes there is no mousemove to kick off the initial auto-hide.
+  // Ensure the controls auto-hide after a few seconds of inactivity.
+  useEffect(() => {
+    if (!isAndroidTV) return; // Desktop already handled by mouse events
+    if (!showControls) return;
+
+    // If menus are open, don't auto-hide
+    if (showAudioMenu || showSubtitleMenu) return;
+
+    if (hideTimeoutRef.current) {
+      clearTimeout(hideTimeoutRef.current);
+    }
+
+    hideTimeoutRef.current = window.setTimeout(() => {
+      // Double-check menus are still closed before hiding
+      if (!showAudioMenu && !showSubtitleMenu) {
+        setShowControls(false);
+      }
+    }, 3000);
+
+    return () => {
+      if (hideTimeoutRef.current) {
+        clearTimeout(hideTimeoutRef.current);
+        hideTimeoutRef.current = null;
+      }
+    };
+  }, [isAndroidTV, showControls, showAudioMenu, showSubtitleMenu]);
+
   // Helper function to get video height from media source
   const getVideoHeight = (source: MediaSource): number => {
     const videoStream = source.MediaStreams?.find(s => s.Type === 'Video');
@@ -1030,6 +1058,28 @@ export function Player() {
       videoRef.current.pause();
     }
   }, []);
+
+  // Effect to handle space bar for pause/unpause
+  useEffect(() => {
+    const handleSpaceBar = (e: KeyboardEvent) => {
+      // Check if we're in an input field
+      const target = e.target as HTMLElement;
+      const isInInput = target?.tagName === 'INPUT' || 
+                        target?.tagName === 'TEXTAREA' ||
+                        target?.isContentEditable;
+      
+      // Only handle space bar for video pause/unpause
+      if (e.key === ' ' && !isInInput) {
+        e.preventDefault();
+        e.stopPropagation();
+        togglePlayPause();
+      }
+    };
+
+    // Use capture phase to intercept before TV navigation
+    window.addEventListener('keydown', handleSpaceBar, true);
+    return () => window.removeEventListener('keydown', handleSpaceBar, true);
+  }, [togglePlayPause]);
 
   // Helpers for keyboard-accelerated seeking on the seek bar
   const clampTime = (t: number, min: number, max: number) => Math.max(min, Math.min(max, t));
