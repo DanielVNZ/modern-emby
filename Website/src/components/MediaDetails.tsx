@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { embyApi } from '../services/embyApi';
-import { LoadingScreen } from './LoadingScreen';
+// Modern overlay + inline skeletons
 import { useTVNavigation } from '../hooks/useTVNavigation';
 import type { EmbyItem } from '../types/emby.types';
 
@@ -176,6 +176,8 @@ function EpisodeCard({
 export function MediaDetails() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const mediaHint = (location.state as any)?.mediaType as 'Movie' | 'Series' | 'Episode' | undefined;
   useTVNavigation();
   
   const [item, setItem] = useState<EmbyItem | null>(null);
@@ -184,15 +186,17 @@ export function MediaDetails() {
   const [allEpisodes, setAllEpisodes] = useState<EmbyItem[]>([]);
   const [selectedSeason, setSelectedSeason] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [showContent, setShowContent] = useState(false);
+  // Page content is always visible; elements fade individually
   const [continueWatchingEpisode, setContinueWatchingEpisode] = useState<EmbyItem | null>(null);
   const [similarItems, setSimilarItems] = useState<EmbyItem[]>([]);
   const playButtonRef = useRef<HTMLButtonElement>(null);
   const similarScrollRef = useRef<HTMLDivElement>(null);
+  const seasonTabsRef = useRef<HTMLDivElement>(null);
   const [canScrollSimilarLeft, setCanScrollSimilarLeft] = useState(false);
   const [canScrollSimilarRight, setCanScrollSimilarRight] = useState(true);
   const hasAutoSelectedSeasonRef = useRef(false);
   const [isMarkingSeasonWatched, setIsMarkingSeasonWatched] = useState(false);
+  const [isFavChanging, setIsFavChanging] = useState(false);
   // TV layout now handled with CSS-only (no JS offsets)
 
   // TV-specific spacing handled in CSS (tv-navigation.css)
@@ -303,18 +307,12 @@ export function MediaDetails() {
   // Focus the play button when loading completes
   useEffect(() => {
     if (!isLoading && item) {
-      // Trigger content fade in after a short delay
-      const showTimer = setTimeout(() => {
-        setShowContent(true);
-      }, 50);
-      
       // Focus play button
       const focusTimer = setTimeout(() => {
         playButtonRef.current?.focus();
       }, 100);
       
       return () => {
-        clearTimeout(showTimer);
         clearTimeout(focusTimer);
       };
     }
@@ -457,6 +455,49 @@ export function MediaDetails() {
     }
   };
 
+  const handleToggleFavorite = async () => {
+    if (!item) return;
+    const isFav = !!item.UserData?.IsFavorite;
+
+    // Optimistic UI update (preserve other required UserData fields)
+    setItem(prev => {
+      if (!prev) return prev;
+      const prevUD = prev.UserData || { PlaybackPositionTicks: 0, PlayCount: 0, IsFavorite: false, Played: false };
+      return { ...prev, UserData: { ...prevUD, IsFavorite: !isFav } };
+    });
+    setIsFavChanging(true);
+
+    try {
+      if (!isFav) {
+        await embyApi.markFavorite(item.Id);
+        localStorage.setItem('emby_hasFavorites', 'true');
+      } else {
+        await embyApi.unmarkFavorite(item.Id);
+      }
+    } catch (error) {
+      console.error('Failed to toggle favorite:', error);
+      setItem(prev => {
+        if (!prev) return prev;
+        const prevUD = prev.UserData || { PlaybackPositionTicks: 0, PlayCount: 0, IsFavorite: false, Played: false };
+        return { ...prev, UserData: { ...prevUD, IsFavorite: isFav } };
+      });
+      alert('Failed to update favorite.');
+    } finally {
+      setIsFavChanging(false);
+    }
+  };
+
+  const scrollSeasonPillIntoView = (target: HTMLButtonElement) => {
+    const container = seasonTabsRef.current;
+    if (!container) return;
+    const containerRect = container.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    if (targetRect.left < containerRect.left || targetRect.right > containerRect.right) {
+      const offset = target.offsetLeft - container.clientWidth / 2 + target.clientWidth / 2;
+      container.scrollTo({ left: Math.max(0, offset), behavior: 'smooth' });
+    }
+  };
+
   // (Removed) JS layout corrections; CSS now ensures non-overlapping sections on TV
 
   const formatRuntime = (ticks?: number) => {
@@ -467,24 +508,22 @@ export function MediaDetails() {
     return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
   };
 
-  if (isLoading || !item) {
-    return <LoadingScreen isVisible={true} />;
-  }
+  // Inline skeletons instead of blocking full-screen loading
 
-  const backdropUrl = item.BackdropImageTags?.[0]
+  const backdropUrl = item?.BackdropImageTags?.[0]
     ? embyApi.getImageUrl(item.Id, 'Backdrop', { maxWidth: 1920, tag: item.BackdropImageTags[0] })
     : '';
 
-  const posterUrl = item.ImageTags?.Primary
+  const posterUrl = item?.ImageTags?.Primary
     ? embyApi.getImageUrl(item.Id, 'Primary', { maxWidth: 400, tag: item.ImageTags.Primary })
     : '';
 
-  const logoUrl = item.ImageTags?.Logo
+  const logoUrl = item?.ImageTags?.Logo
     ? embyApi.getImageUrl(item.Id, 'Logo', { maxWidth: 500, tag: item.ImageTags.Logo })
     : '';
 
   return (
-    <div className={`min-h-screen bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950 transition-opacity duration-500 ${showContent ? 'opacity-100' : 'opacity-0'} media-details`}>
+    <div className={`min-h-screen bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950 media-details`}>
       {/* Fixed Background */}
       <div className="fixed inset-0 z-0">
         {backdropUrl && (
@@ -516,10 +555,12 @@ export function MediaDetails() {
           {/* Poster */}
           <div className="hidden md:block flex-shrink-0 w-72">
             <div className="aspect-[2/3] rounded-xl overflow-hidden shadow-2xl shadow-black/50 ring-1 ring-white/10">
-              {posterUrl ? (
+              {isLoading && !posterUrl ? (
+                <div className="w-full h-full bg-gradient-to-br from-gray-800 to-gray-900 animate-pulse" />
+              ) : posterUrl ? (
                 <img
                   src={posterUrl}
-                  alt={item.Name}
+                  alt={item?.Name || ''}
                   loading="lazy"
                   className="w-full h-full object-cover"
                 />
@@ -536,45 +577,63 @@ export function MediaDetails() {
           {/* Info */}
           <div className="flex-1 flex flex-col justify-center">
             {/* Logo or Title */}
-            {logoUrl ? (
+            {isLoading && !item ? (
+              <div className="w-80 h-12 bg-white/10 rounded mb-6 animate-pulse" />
+            ) : logoUrl ? (
               <img
                 src={logoUrl}
-                alt={item.Name}
+                alt={item?.Name || ''}
                 loading="lazy"
-                className="max-w-md max-h-32 object-contain mb-6"
+                className="max-w-md max-h-32 object-contain mb-6 transition-opacity duration-300"
               />
             ) : (
-              <h1 className="text-5xl font-bold text-white mb-4">{item.Name}</h1>
+              <h1 className="text-5xl font-bold text-white mb-4 transition-opacity duration-300">{item?.Name}</h1>
             )}
 
             {/* Meta info */}
             <div className="flex flex-wrap items-center gap-4 mb-6 text-gray-300">
-              {item.ProductionYear && (
-                <span className="text-lg">{item.ProductionYear}</span>
-              )}
-              {item.OfficialRating && (
-                <span className="px-2 py-1 bg-white/10 rounded border border-white/20 text-sm font-medium">
-                  {item.OfficialRating}
-                </span>
-              )}
-              {item.CommunityRating && (
-                <span className="flex items-center gap-1">
-                  <svg className="w-5 h-5 text-yellow-500" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
-                  </svg>
-                  {item.CommunityRating.toFixed(1)}
-                </span>
-              )}
-              {item.RunTimeTicks && (
-                <span>{formatRuntime(item.RunTimeTicks)}</span>
-              )}
-              {item.Type === 'Series' && seasons.length > 0 && (
-                <span>{seasons.length} Season{seasons.length !== 1 ? 's' : ''}</span>
+              {isLoading && !item ? (
+                <>
+                  <span className="w-10 h-5 rounded bg-white/10 animate-pulse" />
+                  <span className="w-12 h-6 rounded bg-white/10 animate-pulse" />
+                  <span className="w-16 h-5 rounded bg-white/10 animate-pulse" />
+                </>
+              ) : (
+                <>
+                  {item?.ProductionYear && (
+                    <span className="text-lg">{item.ProductionYear}</span>
+                  )}
+                  {item?.OfficialRating && (
+                    <span className="px-2 py-1 bg-white/10 rounded border border-white/20 text-sm font-medium">
+                      {item.OfficialRating}
+                    </span>
+                  )}
+                  {item?.CommunityRating && (
+                    <span className="flex items-center gap-1">
+                      <svg className="w-5 h-5 text-yellow-500" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+                      </svg>
+                      {item.CommunityRating.toFixed(1)}
+                    </span>
+                  )}
+                  {item?.RunTimeTicks && (
+                    <span>{formatRuntime(item.RunTimeTicks)}</span>
+                  )}
+                  {item?.Type === 'Series' && seasons.length > 0 && (
+                    <span>{seasons.length} Season{seasons.length !== 1 ? 's' : ''}</span>
+                  )}
+                </>
               )}
             </div>
 
             {/* Genres */}
-            {item.Genres && item.Genres.length > 0 && (
+            {isLoading && !item ? (
+              <div className="flex gap-2 mb-6">
+                <span className="w-16 h-7 rounded-full bg-blue-500/20 border border-blue-500/30 animate-pulse" />
+                <span className="w-20 h-7 rounded-full bg-blue-500/20 border border-blue-500/30 animate-pulse" />
+                <span className="w-14 h-7 rounded-full bg-blue-500/20 border border-blue-500/30 animate-pulse" />
+              </div>
+            ) : item?.Genres && item.Genres.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-6">
                 {item.Genres.map((genre) => (
                   <button
@@ -589,7 +648,13 @@ export function MediaDetails() {
             )}
 
             {/* Overview */}
-            {item.Overview && (
+            {isLoading && !item ? (
+              <div className="mb-8 max-w-3xl space-y-2">
+                <div className="h-5 bg-white/10 rounded animate-pulse" />
+                <div className="h-5 bg-white/10 rounded animate-pulse w-11/12" />
+                <div className="h-5 bg-white/10 rounded animate-pulse w-10/12" />
+              </div>
+            ) : item?.Overview && (
               <p className="text-gray-300 text-lg leading-relaxed mb-8 max-w-3xl line-clamp-4">
                 {item.Overview}
               </p>
@@ -598,11 +663,13 @@ export function MediaDetails() {
             {/* Action Buttons */}
             <div className="flex flex-wrap items-center gap-4">
               {/* Continue Watching button for series with in-progress episode */}
-              {continueWatchingEpisode && item.Type === 'Series' && (
+              {isLoading && !item ? (
+                <div className="px-24 py-4 rounded-lg bg-white/10 border border-white/10 animate-pulse" />
+              ) : continueWatchingEpisode && item?.Type === 'Series' && (
                 <button
                   ref={playButtonRef}
                   onClick={handleContinueWatching}
-                  className="px-8 py-4 bg-white text-black font-bold rounded-lg hover:bg-gray-200 transition-all duration-200 flex items-center gap-3 shadow-xl shadow-white/10 text-lg primary-action"
+                  className="px-8 py-4 bg-white text-black font-bold rounded-lg hover:bg-white/90 hover:shadow-2xl hover:shadow-white/30 hover:-translate-y-0.5 transition-all duration-200 flex items-center gap-3 shadow-xl shadow-white/10 text-lg primary-action"
                 >
                   <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M8 5v14l11-7z"/>
@@ -617,7 +684,9 @@ export function MediaDetails() {
               )}
               
               {/* Regular Play button */}
-              {(!continueWatchingEpisode || item.Type !== 'Series') && (
+              {isLoading && !item ? (
+                <div className="px-16 py-4 rounded-lg bg-white/10 border border-white/10 animate-pulse" />
+              ) : (!continueWatchingEpisode || item?.Type !== 'Series') && (
                 <button
                   ref={playButtonRef}
                   onClick={() => handlePlay()}
@@ -626,12 +695,12 @@ export function MediaDetails() {
                   <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M8 5v14l11-7z"/>
                   </svg>
-                  {item.UserData?.PlaybackPositionTicks ? 'Resume' : 'Play'}
+                  {item?.UserData?.PlaybackPositionTicks ? 'Resume' : 'Play'}
                 </button>
               )}
               
               {/* Play from Beginning for movies with progress */}
-              {!!item.UserData?.PlaybackPositionTicks && item.Type !== 'Series' && (
+              {!!item?.UserData?.PlaybackPositionTicks && item?.Type !== 'Series' && (
                 <button
                   onClick={() => handlePlay()}
                   className="px-6 py-4 bg-white/10 text-white font-medium rounded-lg hover:bg-white/20 transition-all duration-200 backdrop-blur-sm border border-white/10"
@@ -641,7 +710,7 @@ export function MediaDetails() {
               )}
 
               {/* Play from Beginning for series with continue watching */}
-              {continueWatchingEpisode && item.Type === 'Series' && (
+              {continueWatchingEpisode && item?.Type === 'Series' && (
                 <button
                   onClick={() => handlePlay()}
                   className="px-6 py-4 bg-white/10 text-white font-medium rounded-lg hover:bg-white/20 transition-all duration-200 backdrop-blur-sm border border-white/10"
@@ -649,17 +718,59 @@ export function MediaDetails() {
                   Play from Beginning
                 </button>
               )}
+
+              {/* Favorite toggle (Movies & Series) */}
+              {item && (item.Type === 'Movie' || item.Type === 'Series') && (
+                <button
+                  onClick={handleToggleFavorite}
+                  tabIndex={0}
+                  aria-label={item.UserData?.IsFavorite ? `Unfavorite ${item.Name}` : `Favorite ${item.Name}`}
+                  className={`px-6 py-4 rounded-lg font-medium transition-all duration-200 focusable-item flex items-center gap-3 ${
+                    item.UserData?.IsFavorite
+                      ? 'bg-yellow-400 text-black hover:bg-yellow-300'
+                      : 'bg-white/10 text-white hover:bg-white/20 border border-white/10'
+                  } ${isFavChanging ? 'opacity-70 cursor-wait' : ''}`}
+                  disabled={isFavChanging}
+                >
+                  {isFavChanging ? (
+                    <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                    </svg>
+                  ) : item.UserData?.IsFavorite ? (
+                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                      <path strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
+                    </svg>
+                  )}
+                  {item.UserData?.IsFavorite ? 'Favorited' : 'Favorite'}
+                </button>
+              )}
             </div>
 
             {/* Additional Info */}
             <div className="mt-6 grid grid-cols-2 gap-3 text-sm max-w-xl">
-              {item.Studios && item.Studios.length > 0 && (
+              {isLoading && !item ? (
+                <>
+                  <div>
+                    <span className="text-gray-500">Studio</span>
+                    <div className="h-5 bg-white/10 rounded mt-1 w-40 animate-pulse" />
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Release Date</span>
+                    <div className="h-5 bg-white/10 rounded mt-1 w-28 animate-pulse" />
+                  </div>
+                </>
+              ) : item?.Studios && item.Studios.length > 0 && (
                 <div>
                   <span className="text-gray-500">Studio</span>
                   <p className="text-white">{item.Studios.map(s => s.Name).join(', ')}</p>
                 </div>
               )}
-              {item.PremiereDate && (
+              {item?.PremiereDate && (
                 <div>
                   <span className="text-gray-500">Release Date</span>
                   <p className="text-white">{new Date(item.PremiereDate).toLocaleDateString()}</p>
@@ -670,89 +781,120 @@ export function MediaDetails() {
         </div>
       </div>
 
-      {/* Seasons & Episodes for Series */}
-      {item.Type === 'Series' && seasons.length > 0 && (
+      {/* Seasons & Episodes */}
+      {(item?.Type === 'Series') || (isLoading && !item && mediaHint === 'Series') ? (
         <div className="max-w-7xl mx-auto px-6 relative z-20 media-episodes-section">
           {/* Season Selector - Dropdown style for many seasons, tabs for few */}
-          <div className="flex items-center gap-4 mb-6">
-            <h2 className="text-xl font-bold text-white">Episodes</h2>
-            {seasons.length <= 5 ? (
-              <div
-                className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide season-tabs"
-                role="list"
-                aria-label="Season selector"
-                data-tv-row
-              >
-                {seasons.map((season) => (
-                  <button
-                    key={season.Id}
-                    onClick={() => setSelectedSeason(season.Id)}
-                    tabIndex={0}
-                    role="listitem"
-                    className={`px-4 py-2 rounded-full font-medium whitespace-nowrap transition-all duration-200 text-sm focusable-tab ${
-                      selectedSeason === season.Id
-                        ? 'bg-white text-black'
-                        : 'bg-white/10 text-gray-300 hover:bg-white/20'
-                    }`}
-                  >
-                    {season.Name}
-                  </button>
-                ))}
+          <div className="flex flex-col gap-3 mb-6">
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-xl font-bold text-white">Episodes</h2>
+              {!isLoading && item ? (
+                <span className="text-gray-500 text-sm">{episodes.length} episodes</span>
+              ) : (
+                <span className="w-24 h-5 bg-white/10 rounded animate-pulse" />
+              )}
+
+              {/* Mark Season Watched Button */}
+              {!isLoading && item ? (
+                <button
+                  onClick={handleMarkSeasonWatched}
+                  disabled={isMarkingSeasonWatched || episodes.length === 0}
+                  className={`w-full sm:w-auto sm:ml-auto px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200 focusable-tab flex items-center gap-2 ${
+                    episodes.every(ep => ep.UserData?.Played)
+                      ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30 border border-green-500/30'
+                      : 'bg-white/10 text-gray-300 hover:bg-white/20 border border-white/10'
+                  } ${isMarkingSeasonWatched ? 'opacity-50 cursor-wait' : ''}`}
+                >
+                  {isMarkingSeasonWatched ? (
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                    </svg>
+                  )}
+                  <span className="hidden sm:inline">
+                    {episodes.every(ep => ep.UserData?.Played) ? 'Mark Season Unwatched' : 'Mark Season Watched'}
+                  </span>
+                  <span className="sm:hidden">
+                    {episodes.every(ep => ep.UserData?.Played) ? 'Unwatched' : 'Watched'}
+                  </span>
+                </button>
+              ) : (
+                <div className="w-full sm:w-40 h-9 rounded bg-white/10 animate-pulse sm:ml-auto" />
+              )}
+            </div>
+
+            {isLoading && !item ? (
+              <div className="flex items-center gap-2 pb-2">
+                <span className="w-20 h-8 rounded-full bg-white/10 animate-pulse" />
+                <span className="w-24 h-8 rounded-full bg-white/10 animate-pulse" />
+                <span className="w-16 h-8 rounded-full bg-white/10 animate-pulse" />
               </div>
             ) : (
-              <div className="relative">
-                <select
-                  value={selectedSeason || ''}
-                  onChange={(e) => setSelectedSeason(e.target.value)}
-                  className="appearance-none px-4 py-2 pr-10 bg-white/10 text-white rounded-lg border border-white/10 focus:outline-none focus:border-blue-500 cursor-pointer"
+              <>
+                <div
+                  ref={seasonTabsRef}
+                  className="hidden sm:flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide season-tabs"
+                  role="list"
+                  aria-label="Season selector"
+                  data-tv-row
                 >
                   {seasons.map((season) => (
-                    <option key={season.Id} value={season.Id} className="bg-gray-900">
+                    <button
+                      key={season.Id}
+                      onClick={() => setSelectedSeason(season.Id)}
+                      onFocus={(e) => scrollSeasonPillIntoView(e.currentTarget)}
+                      tabIndex={0}
+                      role="listitem"
+                      className={`px-4 py-2 rounded-full font-medium whitespace-nowrap transition-all duration-200 text-sm focusable-tab ${
+                        selectedSeason === season.Id
+                          ? 'bg-white text-black'
+                          : 'bg-white/10 text-gray-300 hover:bg-white/20'
+                      }`}
+                    >
                       {season.Name}
-                    </option>
+                    </button>
                   ))}
-                </select>
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
                 </div>
-              </div>
+                <div className="relative sm:hidden w-full">
+                  <select
+                    value={selectedSeason || ''}
+                    onChange={(e) => setSelectedSeason(e.target.value)}
+                    className="appearance-none w-full px-4 py-2 pr-10 bg-white/10 text-white rounded-lg border border-white/10 focus:outline-none focus:border-blue-500 cursor-pointer focusable-tab"
+                    data-tv-row
+                  >
+                    {seasons.map((season) => (
+                      <option key={season.Id} value={season.Id} className="bg-gray-900">
+                        {season.Name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </div>
+              </>
             )}
-            <span className="text-gray-500 text-sm">{episodes.length} episodes</span>
-            
-            {/* Mark Season Watched Button */}
-            <button
-              onClick={handleMarkSeasonWatched}
-              disabled={isMarkingSeasonWatched || episodes.length === 0}
-              className={`ml-auto px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200 focusable-tab flex items-center gap-2 ${
-                episodes.every(ep => ep.UserData?.Played)
-                  ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30 border border-green-500/30'
-                  : 'bg-white/10 text-gray-300 hover:bg-white/20 border border-white/10'
-              } ${isMarkingSeasonWatched ? 'opacity-50 cursor-wait' : ''}`}
-            >
-              {isMarkingSeasonWatched ? (
-                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-              ) : (
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
-                </svg>
-              )}
-              <span className="hidden sm:inline">
-                {episodes.every(ep => ep.UserData?.Played) ? 'Mark Season Unwatched' : 'Mark Season Watched'}
-              </span>
-              <span className="sm:hidden">
-                {episodes.every(ep => ep.UserData?.Played) ? 'Unwatched' : 'Watched'}
-              </span>
-            </button>
           </div>
 
           {/* Episodes - Compact Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 episodes-grid" role="list" aria-label="Episodes">
-            {episodes.map((episode) => {
+            {isLoading && !item ? (
+              Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="group bg-white/5 rounded-xl overflow-hidden">
+                  <div className="relative aspect-video bg-gradient-to-br from-gray-800 to-gray-900 animate-pulse" />
+                  <div className="p-3">
+                    <div className="h-4 bg-white/10 rounded w-11/12 mb-2 animate-pulse" />
+                    <div className="h-3 bg-white/10 rounded w-8/12 animate-pulse" />
+                  </div>
+                </div>
+              ))
+            ) : episodes.map((episode) => {
               const thumbUrl = episode.ImageTags?.Primary
                 ? embyApi.getImageUrl(episode.Id, 'Primary', { maxWidth: 400, tag: episode.ImageTags.Primary })
                 : '';
@@ -776,10 +918,23 @@ export function MediaDetails() {
             })}
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* More Like This Section */}
-      {similarItems.length > 0 && (
+      {isLoading && !item ? (
+        <div className="relative z-10 px-6 lg:px-12 py-8">
+          <div className="h-6 w-40 bg-white/10 rounded mb-4 animate-pulse" />
+          <div className="flex gap-4 overflow-hidden pb-4">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="w-36 lg:w-44">
+                <div className="aspect-[2/3] rounded-xl bg-gradient-to-br from-gray-800 to-gray-900 animate-pulse mb-3" />
+                <div className="h-4 bg-white/10 rounded w-10/12 mb-2 animate-pulse" />
+                <div className="h-3 bg-white/10 rounded w-8/12 animate-pulse" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : similarItems.length > 0 && (
         <div className="relative z-10 px-6 lg:px-12 py-8">
           <h2 className="text-xl font-bold text-white mb-4">More Like This</h2>
           <div className="relative group/similar">
@@ -841,7 +996,7 @@ export function MediaDetails() {
               return (
                 <button
                   key={similarItem.Id}
-                  onClick={() => navigate(`/details/${similarItem.Id}`)}
+                  onClick={() => navigate(`/details/${similarItem.Id}`, { state: { mediaType: similarItem.Type } })}
                   className="flex-shrink-0 w-36 lg:w-44 group text-left focusable-card"
                   role="listitem"
                 >

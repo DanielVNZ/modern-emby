@@ -2,7 +2,7 @@ import { type ReactNode, lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { authService } from './services/auth';
 import { embyApi } from './services/embyApi';
-import { LoadingScreen } from './components/LoadingScreen';
+import { AppFallbackSkeleton } from './components/AppFallbackSkeleton';
 
 // Lazy load all route components for better initial load
 const Login = lazy(() => import('./components/Login').then(m => ({ default: m.Login })));
@@ -31,7 +31,7 @@ function App() {
 
   return (
     <BrowserRouter>
-      <Suspense fallback={<LoadingScreen />}>
+      <Suspense fallback={<AppFallbackSkeleton />}>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route

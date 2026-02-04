@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import Hls from 'hls.js';
 import { embyApi } from '../services/embyApi';
 import { MediaSelector } from './MediaSelector';
-import { LoadingScreen } from './LoadingScreen';
+// Inline skeleton replaces full-screen loading
 import { usePlayerTVNavigation, useTVNavigation } from '../hooks/useTVNavigation';
 import type { MediaSource, EmbyItem } from '../types/emby.types';
 
@@ -23,8 +23,10 @@ export function Player() {
   const [showSelector, setShowSelector] = useState(false);
   const [showAudioMenu, setShowAudioMenu] = useState(false);
   const [showSubtitleMenu, setShowSubtitleMenu] = useState(false);
+  const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [selectedAudioIndex, setSelectedAudioIndex] = useState<number | undefined>();
   const [selectedSubtitleIndex, setSelectedSubtitleIndex] = useState<number | null>(null);
+  const [selectedFilter, setSelectedFilter] = useState<string>(() => localStorage.getItem('player_videoFilter') || 'normal');
   const [error, setError] = useState<string>('');
   const [showControls, setShowControls] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -282,22 +284,23 @@ export function Player() {
   useEffect(() => {
     const handleMenuClose = (e: KeyboardEvent) => {
       if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'GoBack') {
-        if (showAudioMenu || showSubtitleMenu) {
+        if (showAudioMenu || showSubtitleMenu || showFilterMenu) {
           e.preventDefault();
           e.stopPropagation();
           setShowAudioMenu(false);
           setShowSubtitleMenu(false);
+          setShowFilterMenu(false);
         }
       }
     };
 
     window.addEventListener('keydown', handleMenuClose, true);
     return () => window.removeEventListener('keydown', handleMenuClose, true);
-  }, [showAudioMenu, showSubtitleMenu]);
+  }, [showAudioMenu, showSubtitleMenu, showFilterMenu]);
 
   // Effect to auto-focus first menu item when audio/subtitle menu opens
   useEffect(() => {
-    if (showAudioMenu || showSubtitleMenu) {
+    if (showAudioMenu || showSubtitleMenu || showFilterMenu) {
       // Small delay to let the menu render
       setTimeout(() => {
         const menuItem = document.querySelector('[role="menu"] [role="menuitem"]') as HTMLElement;
@@ -306,7 +309,7 @@ export function Player() {
         }
       }, 50);
     }
-  }, [showAudioMenu, showSubtitleMenu]);
+  }, [showAudioMenu, showSubtitleMenu, showFilterMenu]);
 
   // Effect to handle video events
   useEffect(() => {
@@ -426,7 +429,7 @@ export function Player() {
     }
     
     hideTimeoutRef.current = setTimeout(() => {
-      if (!showAudioMenu && !showSubtitleMenu) {
+      if (!showAudioMenu && !showSubtitleMenu && !showFilterMenu) {
         setShowControls(false);
       }
     }, 3000);
@@ -448,7 +451,7 @@ export function Player() {
     if (!showControls) return;
 
     // If menus are open, don't auto-hide
-    if (showAudioMenu || showSubtitleMenu) return;
+    if (showAudioMenu || showSubtitleMenu || showFilterMenu) return;
 
     if (hideTimeoutRef.current) {
       clearTimeout(hideTimeoutRef.current);
@@ -456,7 +459,7 @@ export function Player() {
 
     hideTimeoutRef.current = window.setTimeout(() => {
       // Double-check menus are still closed before hiding
-      if (!showAudioMenu && !showSubtitleMenu) {
+      if (!showAudioMenu && !showSubtitleMenu && !showFilterMenu) {
         setShowControls(false);
       }
     }, 3000);
@@ -467,7 +470,7 @@ export function Player() {
         hideTimeoutRef.current = null;
       }
     };
-  }, [isAndroidTV, showControls, showAudioMenu, showSubtitleMenu]);
+  }, [isAndroidTV, showControls, showAudioMenu, showSubtitleMenu, showFilterMenu]);
 
   // Helper function to get video height from media source
   const getVideoHeight = (source: MediaSource): number => {
@@ -1096,7 +1099,7 @@ export function Player() {
   usePlayerTVNavigation({
     showControls,
     setShowControls,
-    isMenuOpen: showAudioMenu || showSubtitleMenu,
+    isMenuOpen: showAudioMenu || showSubtitleMenu || showFilterMenu,
     onTogglePlayPause: togglePlayPause,
     onSeekForward: skipForward,
     onSeekBackward: skipBackward,
@@ -1247,8 +1250,50 @@ export function Player() {
   };
 
   if (isLoading) {
-    return <LoadingScreen />;
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="flex flex-col items-center gap-6">
+          <div className="relative w-24 h-24">
+            <div className="absolute inset-0 rounded-full border-2 border-white/10" />
+            <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-blue-500/80 border-r-purple-500/80 animate-[spin_2.4s_linear_infinite]" />
+            <div className="absolute inset-3 rounded-full bg-gradient-to-br from-blue-600 to-purple-600 blur-sm opacity-60" />
+            <div className="absolute inset-3 rounded-full bg-black" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="relative">
+                <div className="absolute inset-0 rounded-full bg-blue-500/20 blur-md animate-ping" />
+                <svg className="relative w-8 h-8 text-white" viewBox="0 0 24 24" fill="currentColor" aria-label="Loading">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              </div>
+            </div>
+          </div>
+          <div className="w-56 h-1.5 bg-white/10 rounded-full overflow-hidden">
+            <div className="h-full bg-gradient-to-r from-blue-500 via-purple-500 to-blue-500 animate-[shimmer_1.6s_ease-in-out_infinite]" style={{backgroundSize:'200% 100%'}} />
+          </div>
+        </div>
+      </div>
+    );
   }
+
+  // Video filter presets
+  const filterPresets: { key: string; name: string; css: string }[] = [
+    { key: 'normal', name: 'Normal', css: 'none' },
+    { key: 'vibrant', name: 'Vibrant', css: 'saturate(1.3) contrast(1.05)' },
+    { key: 'cinema', name: 'Cinema', css: 'contrast(1.1) brightness(0.95) saturate(1.1) hue-rotate(-3deg)' },
+    { key: 'warm', name: 'Warm', css: 'sepia(0.06) saturate(1.1) brightness(1.02)' },
+    { key: 'cool', name: 'Cool', css: 'brightness(1.02) saturate(0.95) hue-rotate(-8deg)' },
+    { key: 'noir', name: 'Noir', css: 'grayscale(1) contrast(1.05)' },
+    { key: 'high-contrast', name: 'High Contrast', css: 'contrast(1.2) brightness(0.98)' },
+    { key: 'night', name: 'Night', css: 'brightness(0.85) contrast(1.05)' },
+  ];
+
+  const currentFilterCss = filterPresets.find(p => p.key === selectedFilter)?.css || 'none';
+
+  const applyFilter = (key: string) => {
+    setSelectedFilter(key);
+    localStorage.setItem('player_videoFilter', key);
+    setShowFilterMenu(false);
+  };
 
   if (error) {
     return (
@@ -1314,20 +1359,22 @@ export function Player() {
               {selectedSource && (() => {
                 const videoStream = selectedSource.MediaStreams?.find(s => s.Type === 'Video');
                 const height = videoStream?.Height || 0;
+                const width = videoStream?.Width || 0;
                 const codec = videoStream?.Codec?.toUpperCase() || '';
                 const bitrate = selectedSource.Bitrate ? Math.round(selectedSource.Bitrate / 1000000) : null;
-                
+
+                // Consider cropped scope titles: treat 3840-wide as 4K even if height < 2160
                 let qualityLabel = '';
-                if (height >= 2160) qualityLabel = '4K';
-                else if (height >= 1080) qualityLabel = '1080p';
-                else if (height >= 720) qualityLabel = '720p';
-                else if (height >= 480) qualityLabel = '480p';
+                if (width >= 3800 || height >= 2160) qualityLabel = '4K';
+                else if (width >= 1920 || height >= 1080) qualityLabel = '1080p';
+                else if (width >= 1280 || height >= 720) qualityLabel = '720p';
+                else if (width >= 854 || height >= 480) qualityLabel = '480p';
                 else if (height > 0) qualityLabel = `${height}p`;
-                
+
                 return (
                   <div className="flex items-center gap-2 px-3 py-1.5 bg-black/50 backdrop-blur-sm rounded-lg">
                     {qualityLabel && (
-                      <span className={`text-sm font-bold ${height >= 2160 ? 'text-yellow-400' : height >= 1080 ? 'text-blue-400' : 'text-gray-300'}`}>
+                      <span className={`text-sm font-bold ${(width >= 3800 || height >= 2160) ? 'text-yellow-400' : (width >= 1920 || height >= 1080) ? 'text-blue-400' : 'text-gray-300'}`}>
                         {qualityLabel}
                       </span>
                     )}
@@ -1349,6 +1396,7 @@ export function Player() {
             autoPlay
             onClick={togglePlayPause}
             className="w-full h-full object-contain cursor-pointer"
+            style={{ filter: currentFilterCss }}
             crossOrigin="anonymous"
             poster={
               item?.Type === 'Episode' && item.SeriesId
@@ -1720,10 +1768,11 @@ export function Player() {
                   {(() => {
                     const videoStream = selectedSource.MediaStreams?.find(s => s.Type === 'Video');
                     const height = videoStream?.Height || 0;
+                    const width = videoStream?.Width || 0;
                     let quality = '';
-                    if (height >= 2160) quality = '4K';
-                    else if (height >= 1080) quality = '1080p';
-                    else if (height >= 720) quality = '720p';
+                    if (width >= 3800 || height >= 2160) quality = '4K';
+                    else if (width >= 1920 || height >= 1080) quality = '1080p';
+                    else if (width >= 1280 || height >= 720) quality = '720p';
                     else quality = '480p';
                     return `${quality} • ${mediaSources.length} versions`;
                   })()}
@@ -1745,6 +1794,40 @@ export function Player() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
               </svg>
             </button>
+
+            {/* Video filter button */}
+            <div className="relative" role="listitem">
+              <button
+                onClick={() => { setShowFilterMenu(!showFilterMenu); setShowAudioMenu(false); setShowSubtitleMenu(false); }}
+                className={`player-control px-4 py-2.5 bg-black/60 hover:bg-black/80 text-white text-sm rounded-full transition-all duration-200 backdrop-blur-md border hover:scale-105 active:scale-95 flex items-center gap-2 ${
+                  selectedFilter !== 'normal' ? 'border-blue-500 bg-blue-500/20' : 'border-white/10 hover:border-white/20'
+                }`}
+                tabIndex={0}
+                title="Video Filters"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h18M6 12h12M10 19h4" />
+                </svg>
+                Filters
+              </button>
+
+              {showFilterMenu && (
+                <div className="absolute bottom-full mb-2 right-0 bg-gray-900/95 backdrop-blur-md border border-white/10 rounded-xl shadow-2xl min-w-[220px] max-h-[300px] overflow-y-auto" role="menu">
+                  {filterPresets.map(preset => (
+                    <button
+                      key={preset.key}
+                      onClick={() => applyFilter(preset.key)}
+                      className={`player-menu-item w-full px-4 py-3 text-left transition-all duration-150 border-b border-white/5 last:border-b-0 ${
+                        selectedFilter === preset.key ? 'bg-blue-500/20 text-blue-400' : 'text-white hover:bg-white/10'
+                      }`}
+                      role="menuitem"
+                    >
+                      <div className="font-medium">{preset.name}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Fullscreen button (hide on Android TV) */}
             {!isAndroidTV && (
@@ -1769,7 +1852,7 @@ export function Player() {
             {selectedSource && selectedSource.MediaStreams.filter(s => s.Type === 'Subtitle' && s.IsTextSubtitleStream).length > 0 && (
               <div className="relative" role="listitem">
                 <button
-                  onClick={() => { setShowSubtitleMenu(!showSubtitleMenu); setShowAudioMenu(false); }}
+                  onClick={() => { setShowSubtitleMenu(!showSubtitleMenu); setShowAudioMenu(false); setShowFilterMenu(false); }}
                   className={`player-control px-4 py-2.5 bg-black/60 hover:bg-black/80 text-white text-sm rounded-full transition-all duration-200 backdrop-blur-md border hover:scale-105 active:scale-95 flex items-center gap-2 ${
                     selectedSubtitleIndex !== null ? 'border-blue-500 bg-blue-500/20' : 'border-white/10 hover:border-white/20'
                   }`}
@@ -1823,7 +1906,7 @@ export function Player() {
             {selectedSource && selectedSource.MediaStreams.filter(s => s.Type === 'Audio').length > 1 && (
               <div className="relative" role="listitem">
                 <button
-                  onClick={() => { setShowAudioMenu(!showAudioMenu); setShowSubtitleMenu(false); }}
+                  onClick={() => { setShowAudioMenu(!showAudioMenu); setShowSubtitleMenu(false); setShowFilterMenu(false); }}
                   className="player-control px-4 py-2.5 bg-black/60 hover:bg-black/80 text-white text-sm rounded-full transition-all duration-200 backdrop-blur-md border border-white/10 hover:border-white/20 hover:scale-105 active:scale-95 flex items-center gap-2"
                   tabIndex={0}
                 >

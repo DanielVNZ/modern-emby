@@ -39,11 +39,15 @@ export function MediaSelector({ mediaSources, onSelect, onCancel }: MediaSelecto
 
   const getQualityBadge = (streams: MediaStream[]): { label: string; color: string } => {
     const videoStream = streams.find((s) => s.Type === 'Video');
-    if (!videoStream?.Height) return { label: 'SD', color: 'text-gray-400 bg-gray-800' };
-    
-    if (videoStream.Height >= 2160) return { label: '4K', color: 'text-yellow-400 bg-yellow-900/30' };
-    if (videoStream.Height >= 1080) return { label: '1080p', color: 'text-blue-400 bg-blue-900/30' };
-    if (videoStream.Height >= 720) return { label: '720p', color: 'text-green-400 bg-green-900/30' };
+    const w = videoStream?.Width || 0;
+    const h = videoStream?.Height || 0;
+    if (!w && !h) return { label: 'SD', color: 'text-gray-400 bg-gray-800' };
+
+    // Treat CinemaScope 4K (e.g., 3840x1608) as 4K based on width or pixel count
+    const pixels = w * h;
+    if (w >= 3800 || h >= 2160 || pixels >= 8000000) return { label: '4K', color: 'text-yellow-400 bg-yellow-900/30' };
+    if (w >= 1900 || h >= 1080) return { label: '1080p', color: 'text-blue-400 bg-blue-900/30' };
+    if (w >= 1260 || h >= 720) return { label: '720p', color: 'text-green-400 bg-green-900/30' };
     return { label: '480p', color: 'text-gray-400 bg-gray-800' };
   };
 

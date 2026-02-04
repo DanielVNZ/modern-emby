@@ -51,15 +51,33 @@ export function PopularBrowse() {
   }, [type]);
 
   const handleItemClick = (item: EmbyItem) => {
-    navigate(`/details/${item.Id}`);
+    navigate(`/details/${item.Id}`, { state: { mediaType: item.Type } });
   };
 
   const title = type === 'movies' ? 'Popular Movies' : 'Popular TV Shows';
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950 flex items-center justify-center">
-        <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950">
+        <div className="sticky top-0 z-50 bg-gray-950/90 backdrop-blur-md border-b border-gray-800">
+          <div className="max-w-[1600px] mx-auto px-6 py-4 flex items-center gap-4">
+            <div className="w-10 h-10 rounded-full bg-white/10" />
+            <div className="h-7 w-56 bg-white/10 rounded animate-pulse" />
+            <div className="ml-auto h-5 w-40 bg-white/10 rounded animate-pulse" />
+          </div>
+        </div>
+        <div className="max-w-[1600px] mx-auto px-6 py-8">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-6">
+            {Array.from({ length: 18 }).map((_, i) => (
+              <div key={i}>
+                <div className="aspect-[2/3] rounded-xl bg-gradient-to-br from-gray-800 to-gray-900 animate-pulse mb-3" />
+                <div className="h-4 bg-white/10 rounded w-10/12 mb-2 animate-pulse" />
+                <div className="h-3 bg-white/10 rounded w-6/12 animate-pulse" />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="h-20" />
       </div>
     );
   }

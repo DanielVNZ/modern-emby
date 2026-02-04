@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, memo, useCallback } from 'react';
+import { useState, useEffect, useRef, memo, useCallback, useMemo, type ReactElement } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { embyApi } from '../services/embyApi';
 import { tmdbApi } from '../services/tmdbApi';
@@ -6,7 +6,6 @@ import { deduplicateItems } from '../services/deduplication';
 import { useAuth } from '../hooks/useAuth';
 import { useTVNavigation } from '../hooks/useTVNavigation';
 import type { EmbyItem } from '../types/emby.types';
-import { LoadingScreen } from './LoadingScreen';
 
 // Helper to format date as "1 Jan 2026"
 const formatReleaseDate = (dateString?: string): string => {
@@ -20,8 +19,18 @@ const formatReleaseDate = (dateString?: string): string => {
 };
 
 // MediaCard component - defined outside Home to prevent recreation on re-renders
-const MediaCard = memo(({ item, size = 'normal', onItemClick }: { item: EmbyItem; size?: 'normal' | 'large'; onItemClick: (item: EmbyItem) => void }) => {
+const MediaCard = memo(({ item, size = 'normal', onItemClick, onToggleFavorite, isFavChanging, favoriteIds }: { item: EmbyItem; size?: 'normal' | 'large'; onItemClick: (item: EmbyItem) => void; onToggleFavorite?: (item: EmbyItem) => void; isFavChanging?: boolean; favoriteIds?: Set<string> }) => {
   const [isImageLoaded, setIsImageLoaded] = useState(false);
+  const canFavorite = ((item.Type === 'Movie' || item.Type === 'Series') || (item.Type === 'Episode' && !!item.SeriesId)) && !!onToggleFavorite;
+  const favoriteKey = item.Type === 'Episode' && item.SeriesId ? item.SeriesId : item.Id;
+  const isFavorite = !!item.UserData?.IsFavorite || (favoriteIds ? favoriteIds.has(favoriteKey) : false);
+  const favoriteTarget: EmbyItem = item.Type === 'Episode' && item.SeriesId ? {
+    Id: item.SeriesId,
+    Name: item.SeriesName || item.Name,
+    Type: 'Series',
+    ImageTags: item.SeriesPrimaryImageTag ? { Primary: item.SeriesPrimaryImageTag } : item.ImageTags,
+    UserData: { ...(item.UserData || {}), IsFavorite: isFavorite },
+  } as EmbyItem : item;
   
   // For episodes, use the series cover art if available
   let imageUrl = '';
@@ -37,7 +46,7 @@ const MediaCard = memo(({ item, size = 'normal', onItemClick }: { item: EmbyItem
     : 'w-40 lg:w-36 xl:w-32 2xl:w-36';
 
   return (
-    <button
+    <div
       onClick={() => onItemClick(item)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -46,6 +55,7 @@ const MediaCard = memo(({ item, size = 'normal', onItemClick }: { item: EmbyItem
         }
       }}
       tabIndex={0}
+      role="button"
       className={`flex-shrink-0 ${cardWidth} cursor-pointer group/card focusable-card text-left`}
     >
       <div className="relative aspect-[2/3] bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl overflow-hidden mb-4 shadow-xl shadow-black/40 ring-1 ring-white/5">
@@ -73,6 +83,34 @@ const MediaCard = memo(({ item, size = 'normal', onItemClick }: { item: EmbyItem
             <svg className="w-16 h-16 opacity-30" fill="currentColor" viewBox="0 0 24 24">
               <path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/>
             </svg>
+          </div>
+        )}
+
+        {/* Favorite star (Movies & Series) */}
+        {canFavorite && (
+          <div className="absolute top-2 right-2 flex items-center gap-2 z-30">
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleFavorite && onToggleFavorite(favoriteTarget); }}
+              onPointerDown={(e) => { e.stopPropagation(); }}
+              onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggleFavorite && onToggleFavorite(favoriteTarget); } }}
+              tabIndex={0}
+              data-tv-bottom-only
+              aria-label={isFavorite ? `Unfavorite ${favoriteTarget.Name}` : `Favorite ${favoriteTarget.Name}`}
+              title={isFavorite ? 'Unfavorite' : 'Favorite'}
+              className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors transition-transform duration-150 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-offset-1 focusable-item ${isFavorite ? 'bg-yellow-400 text-white' : 'bg-white/6 text-gray-300 hover:bg-yellow-400 hover:text-white cursor-pointer'}`}
+            >
+              {isFavChanging ? (
+                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path></svg>
+              ) : isFavorite ? (
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <path strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
+                </svg>
+              )}
+            </button>
           </div>
         )}
         
@@ -120,15 +158,18 @@ const MediaCard = memo(({ item, size = 'normal', onItemClick }: { item: EmbyItem
           )}
         </div>
       </div>
-    </button>
+    </div>
   );
 }, (prevProps, nextProps) => {
-  // Only re-render if the item ID or size changes
-  return prevProps.item.Id === nextProps.item.Id && prevProps.size === nextProps.size;
+  return prevProps.item.Id === nextProps.item.Id &&
+    prevProps.size === nextProps.size &&
+    !!prevProps.item.UserData?.IsFavorite === !!nextProps.item.UserData?.IsFavorite &&
+    !!prevProps.isFavChanging === !!nextProps.isFavChanging &&
+    prevProps.favoriteIds === nextProps.favoriteIds;
 });
 
 // MediaRow component - defined outside Home
-const MediaRow = memo(({ title, items, icon, browseLink, subtitle, onItemClick, onBrowseClick }: { 
+const MediaRow = memo(({ title, items, icon, browseLink, subtitle, onItemClick, onBrowseClick, onToggleFavorite, favChanging, favoriteIds, onRemove }: { 
   title: string; 
   items: EmbyItem[]; 
   icon?: React.ReactNode; 
@@ -136,6 +177,10 @@ const MediaRow = memo(({ title, items, icon, browseLink, subtitle, onItemClick, 
   subtitle?: string;
   onItemClick: (item: EmbyItem) => void;
   onBrowseClick?: (link: string) => void;
+  onToggleFavorite?: (item: EmbyItem) => void;
+  favChanging?: Record<string, boolean>;
+  favoriteIds?: Set<string>;
+  onRemove?: () => void;
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -177,6 +222,18 @@ const MediaRow = memo(({ title, items, icon, browseLink, subtitle, onItemClick, 
         <h2 className="text-2xl font-bold text-white">{title}</h2>
         {subtitle && <span className="text-xs text-gray-500 ml-1">{subtitle}</span>}
         <div className="flex-1 h-px bg-gradient-to-r from-gray-800 to-transparent ml-6" />
+        {onRemove && (
+          <button
+            onClick={onRemove}
+            tabIndex={0}
+            className="focusable-item flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-gray-300 hover:text-white bg-white/5 hover:bg-white/15 rounded-xl transition-all border border-white/10 hover:border-white/20"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            Remove
+          </button>
+        )}
         {browseLink && onBrowseClick && (
           <button
             onClick={() => onBrowseClick(browseLink)}
@@ -234,7 +291,14 @@ const MediaRow = memo(({ title, items, icon, browseLink, subtitle, onItemClick, 
           aria-label={title}
         >
           {items.map((item, index) => (
-            <MediaCard key={`${item.Id}-${index}`} item={item} onItemClick={onItemClick} />
+            <MediaCard 
+              key={`${item.Id}-${index}`} 
+              item={item} 
+              onItemClick={onItemClick} 
+              onToggleFavorite={onToggleFavorite}
+              isFavChanging={!!favChanging?.[item.Type === 'Episode' && item.SeriesId ? item.SeriesId : item.Id]}
+              favoriteIds={favoriteIds}
+            />
           ))}
           {/* Spacer to ensure last item isn't cut off */}
           <div className="flex-shrink-0 w-1" />
@@ -246,17 +310,32 @@ const MediaRow = memo(({ title, items, icon, browseLink, subtitle, onItemClick, 
   // Only re-render if items array reference changes or other props change
   return prevProps.items === nextProps.items && 
          prevProps.title === nextProps.title &&
-         prevProps.browseLink === nextProps.browseLink;
+         prevProps.browseLink === nextProps.browseLink &&
+         prevProps.subtitle === nextProps.subtitle &&
+         prevProps.favChanging === nextProps.favChanging &&
+         prevProps.favoriteIds === nextProps.favoriteIds &&
+         prevProps.onRemove === nextProps.onRemove;
 });
 
 export function Home() {
   const navigate = useNavigate();
   const { logout } = useAuth();
   useTVNavigation();
+  const defaultHomeSectionOrder = [
+    'continue_movies',
+    'continue_tv',
+    'favorites',
+    'trending_movies',
+    'popular_tv',
+    'latest_movies',
+    'latest_episodes',
+  ];
   const [latestMovies, setLatestMovies] = useState<EmbyItem[]>([]);
   const [latestEpisodes, setLatestEpisodes] = useState<EmbyItem[]>([]);
   const [resumeMovies, setResumeMovies] = useState<EmbyItem[]>([]);
   const [resumeSeries, setResumeSeries] = useState<EmbyItem[]>([]);
+  const [favoriteItems, setFavoriteItems] = useState<EmbyItem[]>([]);
+  const [favChanging, setFavChanging] = useState<Record<string, boolean>>({});
   const [isInitialLoad, setIsInitialLoad] = useState(true); // Track if this is first load
   const [showContent, setShowContent] = useState(false); // Track content fade in
   const [featuredItems, setFeaturedItems] = useState<EmbyItem[]>([]);
@@ -279,6 +358,25 @@ export function Home() {
   });
   const [popularMovies, setPopularMovies] = useState<EmbyItem[]>([]);
   const [popularTVShows, setPopularTVShows] = useState<EmbyItem[]>([]);
+  const [customSections, setCustomSections] = useState<{ id: string; name: string; filters: any; searchTerm: string; mediaType: string; }[]>([]);
+  const [customSectionItems, setCustomSectionItems] = useState<Record<string, EmbyItem[]>>({});
+  const normalizeFavoritesOrder = (items: EmbyItem[]) => items.slice().reverse();
+  const favoriteIds = useMemo(() => new Set(favoriteItems.map(it => it.Id)), [favoriteItems]);
+
+  const HOME_SECTIONS_KEY = 'home_customSections';
+  const DEFAULT_FILTERS = {
+    sortBy: 'PremiereDate',
+    sortOrder: 'Descending',
+    genres: [] as string[],
+    years: [] as (number | 'Before 1980')[],
+    seasonCounts: [] as (number | '10+')[]
+  };
+
+  const updateFavoriteFlag = (list: EmbyItem[], itemId: string, nextFav: boolean) => list.map(it => {
+    if (it.Id !== itemId) return it;
+    const prevUD = it.UserData || { PlaybackPositionTicks: 0, PlayCount: 0, IsFavorite: false, Played: false };
+    return { ...it, UserData: { ...prevUD, IsFavorite: nextFav } };
+  });
 
   // Load cached data from sessionStorage immediately on mount
   useEffect(() => {
@@ -286,6 +384,7 @@ export function Home() {
     const cachedEpisodes = sessionStorage.getItem('home_latestEpisodes');
     const cachedPopularMovies = sessionStorage.getItem('popular_movies_all');
     const cachedPopularTV = sessionStorage.getItem('popular_tv_all');
+    const cachedFavorites = sessionStorage.getItem('home_favorites');
 
     let hasCache = false;
 
@@ -304,6 +403,16 @@ export function Home() {
         hasCache = true;
       } catch (e) {
         console.error('Failed to parse cached episodes:', e);
+      }
+    }
+
+    if (cachedFavorites) {
+      try {
+        const parsed = JSON.parse(cachedFavorites) as EmbyItem[];
+        setFavoriteItems(normalizeFavoritesOrder(parsed));
+        hasCache = true;
+      } catch (e) {
+        console.error('Failed to parse cached favorites:', e);
       }
     }
 
@@ -333,6 +442,8 @@ export function Home() {
       setPopularTVShows([]);
       sessionStorage.removeItem('popular_movies_all');
       sessionStorage.removeItem('popular_tv_all');
+      localStorage.setItem('emby_hasPopularMovies', 'false');
+      localStorage.setItem('emby_hasPopularTV', 'false');
     }
 
     // If we have cached data, hide loading immediately
@@ -344,6 +455,158 @@ export function Home() {
   useEffect(() => {
     loadData();
   }, []);
+
+  const loadCustomSections = useCallback(async () => {
+    let sections: { id: string; name: string; filters: any; searchTerm: string; mediaType: string; }[] = [];
+    try {
+      const raw = localStorage.getItem(HOME_SECTIONS_KEY);
+      sections = raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      console.error('Failed to load home custom sections:', e);
+    }
+    setCustomSections(sections);
+    if (sections.length === 0) {
+      setCustomSectionItems({});
+      return;
+    }
+
+    // Warm cache for instant render
+    try {
+      const cached = sessionStorage.getItem('home_customSectionItems');
+      if (cached) {
+        const parsed = JSON.parse(cached) as Record<string, EmbyItem[]>;
+        setCustomSectionItems(parsed || {});
+      }
+    } catch (e) {
+      // ignore cache errors
+    }
+
+    const orderRaw = localStorage.getItem('emby_homeSectionOrder');
+    const orderList = orderRaw ? (JSON.parse(orderRaw) as string[]) : [];
+    const enabledIds = new Set([...orderList, ...sections.map(s => s.id)]);
+    const enabledSections = sections.filter(s => enabledIds.has(s.id));
+
+    const results = await Promise.all(enabledSections.map(async (section) => {
+        const f = { ...DEFAULT_FILTERS, ...(section.filters || {}) };
+        const isSeries = section.mediaType === 'Series';
+        const selectedYears = (f.years || []).filter((y: unknown): y is number => typeof y === 'number');
+        const includeBefore1980 = (f.years || []).some((y: unknown) => y === 'Before 1980');
+        const hasSeasonFilter = isSeries && Array.isArray(f.seasonCounts) && f.seasonCounts.length > 0;
+        const needsClientYearFilter = includeBefore1980;
+
+        const baseParams: any = {
+          recursive: true,
+          includeItemTypes: section.mediaType,
+          sortBy: f.sortBy,
+          sortOrder: f.sortOrder,
+          fields: isSeries
+            ? 'Genres,Overview,CommunityRating,OfficialRating,RunTimeTicks,ProductionYear,PremiereDate,Studios,ChildCount,SeasonCount,ProviderIds,Path,MediaSources,UserData'
+            : 'Genres,Overview,CommunityRating,OfficialRating,RunTimeTicks,ProductionYear,PremiereDate,Studios,ProviderIds,Path,MediaSources,UserData',
+        };
+        if (f.genres && f.genres.length > 0) baseParams.genres = f.genres.join(',');
+        if (!needsClientYearFilter && selectedYears.length > 0) baseParams.years = selectedYears.join(',');
+        if ((section.searchTerm || '').trim().length > 0) baseParams.searchTerm = section.searchTerm.trim();
+
+        const maxItems = 50;
+        if (hasSeasonFilter || needsClientYearFilter) {
+          const matches: EmbyItem[] = [];
+          const pageSize = 500;
+          const maxScan = 5000;
+          let startIndex = 0;
+          while (startIndex < maxScan && matches.length < maxItems) {
+            const res = await embyApi.getItems({ ...baseParams, limit: pageSize, startIndex });
+            const batch = res.Items || [];
+            if (batch.length === 0) break;
+            for (const it of batch) {
+              let yearOk = true;
+              if (needsClientYearFilter || selectedYears.length > 0) {
+                let y: number | null = null;
+                if (typeof (it as any).ProductionYear === 'number') y = (it as any).ProductionYear;
+                else if (it.PremiereDate) {
+                  const d = new Date(it.PremiereDate);
+                  if (!isNaN(d.getTime())) y = d.getFullYear();
+                }
+                if (y == null) yearOk = false;
+                else {
+                  const inSelected = selectedYears.length > 0 ? selectedYears.includes(y) : false;
+                  if (needsClientYearFilter) yearOk = y < 1980 || inSelected;
+                  else yearOk = inSelected;
+                }
+              }
+              if (!yearOk) continue;
+
+              if (hasSeasonFilter) {
+                const seasonCount = (it as any).SeasonCount ?? (it as any).ChildCount;
+                const seasonNum = typeof seasonCount === 'number' ? seasonCount : Number(seasonCount);
+                if (seasonNum === undefined || seasonNum === null || Number.isNaN(seasonNum)) continue;
+                const seasonOk = (f.seasonCounts || []).some((sel: any) =>
+                  typeof sel === 'number' ? seasonNum === sel : sel === '10+' ? seasonNum >= 10 : false
+                );
+                if (!seasonOk) continue;
+              }
+
+              matches.push(it);
+              if (matches.length >= maxItems) break;
+            }
+            startIndex += pageSize;
+          }
+          return [section.id, matches] as const;
+        }
+
+        const res = await embyApi.getItems({ ...baseParams, limit: maxItems });
+        return [section.id, res.Items || []] as const;
+      }));
+
+    const itemsById = Object.fromEntries(results);
+    setCustomSectionItems(itemsById);
+    try {
+      sessionStorage.setItem('home_customSectionItems', JSON.stringify(itemsById));
+    } catch (e) {
+      // ignore cache errors
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === HOME_SECTIONS_KEY) {
+        loadCustomSections();
+      }
+    };
+    const handleFocus = () => loadCustomSections();
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') loadCustomSections();
+    };
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [loadCustomSections]);
+
+  useEffect(() => {
+    const t = setTimeout(() => loadCustomSections(), 0);
+    return () => clearTimeout(t);
+  }, [loadCustomSections]);
+
+  const removeCustomSection = (id: string) => {
+    setCustomSections(prev => {
+      const updated = prev.filter(s => s.id !== id);
+      try {
+        localStorage.setItem(HOME_SECTIONS_KEY, JSON.stringify(updated));
+      } catch (e) {
+        console.error('Failed to persist home custom sections:', e);
+      }
+      return updated;
+    });
+    setCustomSectionItems(prev => {
+      const copy = { ...prev };
+      delete copy[id];
+      return copy;
+    });
+  };
 
   useEffect(() => {
     // Rotate featured items every 10 seconds
@@ -372,7 +635,7 @@ export function Home() {
       setIsInitialLoad(true);
       
       // Fetch all data in parallel
-      const [movies, episodes, resumeMovies, resumeEpisodes, recentlyPlayedEpisodes] = await Promise.all([
+      const [movies, episodes, resumeMovies, resumeEpisodes, recentlyPlayedEpisodes, favorites] = await Promise.all([
         // Latest movies by production year
         embyApi.getItems({ 
           recursive: true, 
@@ -419,6 +682,16 @@ export function Home() {
           sortOrder: 'Descending',
           fields: 'Genres,Overview,CommunityRating,OfficialRating,RunTimeTicks,ProductionYear,PremiereDate,UserData,SeriesId,SeriesName,SeriesPrimaryImageTag,ParentIndexNumber,IndexNumber'
         }),
+        // Favorites (movies, series, episodes)
+        embyApi.getItems({
+          recursive: true,
+          includeItemTypes: 'Movie,Series,Episode',
+          filters: 'IsFavorite',
+          limit: 50,
+          sortBy: 'DateCreated',
+          sortOrder: 'Descending',
+          fields: 'Genres,Overview,CommunityRating,OfficialRating,RunTimeTicks,ProductionYear,PremiereDate,UserData,SeriesId,SeriesName,SeriesPrimaryImageTag,ParentIndexNumber,IndexNumber,ChildCount,ProviderIds'
+        }),
       ]);
 
       // Deduplicate movies that exist in multiple libraries
@@ -433,10 +706,16 @@ export function Home() {
         return true;
       });
       setLatestEpisodes(uniqueEpisodes);
-      
+
       // Cache movies and episodes in sessionStorage for instant loading on return
       sessionStorage.setItem('home_latestMovies', JSON.stringify(deduplicatedMovies));
       sessionStorage.setItem('home_latestEpisodes', JSON.stringify(uniqueEpisodes));
+
+      const favoritesItems = favorites.Items || [];
+      const orderedFavorites = normalizeFavoritesOrder(favoritesItems);
+      setFavoriteItems(orderedFavorites);
+      sessionStorage.setItem('home_favorites', JSON.stringify(orderedFavorites));
+      localStorage.setItem('emby_hasFavorites', favoritesItems.length > 0 ? 'true' : 'false');
       
       // Build a map of series ID -> most recent LastPlayedDate from recently played episodes
       const seriesLastPlayedMap = new Map<string, string>();
@@ -712,8 +991,77 @@ export function Home() {
       // Only show first 15 on home page
       setPopularMovies(orderedMovies.slice(0, 15));
       setPopularTVShows(orderedShows.slice(0, 15));
+      localStorage.setItem('emby_hasPopularMovies', orderedMovies.length > 0 ? 'true' : 'false');
+      localStorage.setItem('emby_hasPopularTV', orderedShows.length > 0 ? 'true' : 'false');
     } catch (error) {
       console.error('Failed to load popular content from TMDB:', error);
+    }
+  };
+
+  const applyFavoriteUpdate = (itemId: string, nextFav: boolean, baseItem: EmbyItem) => {
+    setLatestMovies(prev => updateFavoriteFlag(prev, itemId, nextFav));
+    setLatestEpisodes(prev => updateFavoriteFlag(prev, itemId, nextFav));
+    setResumeMovies(prev => updateFavoriteFlag(prev, itemId, nextFav));
+    setResumeSeries(prev => updateFavoriteFlag(prev, itemId, nextFav));
+    setPopularMovies(prev => updateFavoriteFlag(prev, itemId, nextFav));
+    setPopularTVShows(prev => updateFavoriteFlag(prev, itemId, nextFav));
+    setFeaturedItems(prev => updateFavoriteFlag(prev, itemId, nextFav));
+    setCustomSectionItems(prev => {
+      const updated: Record<string, EmbyItem[]> = {};
+      for (const [key, list] of Object.entries(prev)) {
+        updated[key] = updateFavoriteFlag(list, itemId, nextFav);
+      }
+      return updated;
+    });
+    setFeaturedItem(prev => {
+      if (!prev || prev.Id !== itemId) return prev;
+      const prevUD = prev.UserData || { PlaybackPositionTicks: 0, PlayCount: 0, IsFavorite: false, Played: false };
+      return { ...prev, UserData: { ...prevUD, IsFavorite: nextFav } };
+    });
+    setFavoriteItems(prev => {
+      let updated = prev;
+      if (nextFav) {
+        if (prev.some(it => it.Id === itemId)) {
+          updated = updateFavoriteFlag(prev, itemId, true);
+        } else {
+          updated = [{ ...baseItem }, ...prev];
+        }
+      } else {
+        updated = prev.filter(it => it.Id !== itemId);
+      }
+      sessionStorage.setItem('home_favorites', JSON.stringify(updated));
+      localStorage.setItem('emby_hasFavorites', updated.length > 0 ? 'true' : 'false');
+      return updated;
+    });
+  };
+
+  const toggleFavorite = async (item: EmbyItem) => {
+    if (!item || !item.Id) return;
+    const isFav = !!item.UserData?.IsFavorite;
+    const nextFav = !isFav;
+    const prevUD = item.UserData || { PlaybackPositionTicks: 0, PlayCount: 0, IsFavorite: false, Played: false };
+    const optimisticItem = { ...item, UserData: { ...prevUD, IsFavorite: nextFav } };
+
+    applyFavoriteUpdate(item.Id, nextFav, optimisticItem);
+    setFavChanging(prev => ({ ...prev, [item.Id]: true }));
+
+    try {
+      if (nextFav) {
+        await embyApi.markFavorite(item.Id);
+      } else {
+        await embyApi.unmarkFavorite(item.Id);
+      }
+    } catch (e) {
+      console.error('Failed to toggle favorite:', e);
+      const rollbackItem = { ...item, UserData: { ...prevUD, IsFavorite: isFav } };
+      applyFavoriteUpdate(item.Id, isFav, rollbackItem);
+      alert('Failed to update favorite.');
+    } finally {
+      setFavChanging(prev => {
+        const copy = { ...prev };
+        delete copy[item.Id];
+        return copy;
+      });
     }
   };
 
@@ -731,11 +1079,6 @@ export function Home() {
     navigate(link);
   }, [navigate]);
 
-  // Show loading screen only on initial load without cache
-  if (isInitialLoad) {
-    return <LoadingScreen isVisible={true} />;
-  }
-
   // Trigger content fade in after initial load completes
   if (!showContent) {
     setTimeout(() => setShowContent(true), 50);
@@ -746,6 +1089,25 @@ export function Home() {
     : featuredItem?.ImageTags?.Primary
     ? embyApi.getImageUrl(featuredItem.Id, 'Primary', { maxWidth: 1280, tag: featuredItem.ImageTags.Primary })
     : '';
+
+  const savedHomeSectionOrder = (() => {
+    const saved = localStorage.getItem('emby_homeSectionOrder');
+    const allIds = [...defaultHomeSectionOrder, ...customSections.map(s => s.id)];
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          const known = new Set(allIds);
+          const normalized = parsed.filter((id: unknown) => typeof id === 'string' && known.has(id));
+          const missing = allIds.filter(id => !normalized.includes(id));
+          return [...normalized, ...missing];
+        }
+      } catch (error) {
+        console.error('Failed to parse home section order:', error);
+      }
+    }
+    return allIds;
+  })();
 
   return (
     <div className={`min-h-screen bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950 transition-opacity duration-500 ${showContent ? 'opacity-100' : 'opacity-0'}`}>
@@ -827,7 +1189,32 @@ export function Home() {
       </header>
 
       {/* Hero Section */}
-      {showFeatured && featuredItem && (
+      {showFeatured && isInitialLoad && (
+        <div className="relative h-[80vh] sm:h-[70vh] md:h-[80vh] min-h-[400px] sm:min-h-[450px] md:min-h-[560px] overflow-hidden z-10 tv-hero home-hero">
+          <div className="absolute inset-0 bg-gradient-to-r from-gray-950 via-gray-950/90 to-gray-950/60" />
+          <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-transparent to-gray-900/30" />
+          <div className="relative h-full max-w-[1600px] mx-auto px-4 sm:px-6 md:px-8 flex items-center">
+            <div className="max-w-3xl pt-16 sm:pt-20">
+              <div className="flex items-center gap-2 sm:gap-4 mb-3 sm:mb-5">
+                <div className="h-6 w-20 bg-white/10 rounded-full animate-pulse" />
+                <div className="h-6 w-14 bg-white/10 rounded animate-pulse" />
+                <div className="h-6 w-12 bg-white/10 rounded animate-pulse" />
+              </div>
+              <div className="h-10 sm:h-12 md:h-14 w-3/4 bg-white/10 rounded animate-pulse mb-4 sm:mb-6" />
+              <div className="space-y-2 mb-6 sm:mb-8">
+                <div className="h-4 sm:h-5 w-full bg-white/10 rounded animate-pulse" />
+                <div className="h-4 sm:h-5 w-11/12 bg-white/10 rounded animate-pulse" />
+                <div className="h-4 sm:h-5 w-9/12 bg-white/10 rounded animate-pulse" />
+              </div>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-5">
+                <div className="h-12 sm:h-14 w-40 bg-white/10 rounded-xl animate-pulse" />
+                <div className="h-12 sm:h-14 w-32 bg-white/10 rounded-xl animate-pulse" />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {showFeatured && !isInitialLoad && featuredItem && (
         <div className="relative h-[80vh] sm:h-[70vh] md:h-[80vh] min-h-[400px] sm:min-h-[450px] md:min-h-[560px] overflow-hidden z-10 tv-hero home-hero">
           {/* Hero Content */}
           <div className="relative h-full max-w-[1600px] mx-auto px-4 sm:px-6 md:px-8 flex items-center">
@@ -878,85 +1265,212 @@ export function Home() {
 
       {/* Main Content */}
       <main className={`max-w-[1600px] mx-auto px-4 sm:px-6 md:px-8 home-main ${showFeatured && featuredItem ? '-mt-8 sm:-mt-16 md:-mt-28 relative z-10' : 'pt-16 sm:pt-20 md:pt-28'}`}>
-        {/* Content Rows */}
-        <MediaRow
-          title="Continue Watching Movies"
-          items={resumeMovies}
-          onItemClick={handleItemClick}
-          onBrowseClick={handleBrowseClick}
-          icon={
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          }
-        />
-        <MediaRow
-          title="Continue Watching TV"
-          items={resumeSeries}
-          onItemClick={handleItemClick}
-          onBrowseClick={handleBrowseClick}
-          icon={
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          }
-        />
-        {popularMovies.length > 0 && (
-          <MediaRow
-            title="Trending Movies"
-            items={popularMovies}
-            browseLink="/popular/movies"
-            subtitle="Powered by TMDB"
-            onItemClick={handleItemClick}
-            onBrowseClick={handleBrowseClick}
-            icon={
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-              </svg>
-            }
-          />
+        {isInitialLoad ? (
+          <div className="space-y-16">
+            {Array.from({ length: 4 }).map((_, rowIndex) => (
+              <div key={`skeleton-row-${rowIndex}`}>
+                <div className="flex items-center gap-4 mb-6">
+                  <div className="w-5 h-5 rounded bg-white/10 animate-pulse" />
+                  <div className="h-6 w-48 bg-white/10 rounded animate-pulse" />
+                  <div className="flex-1 h-px bg-gradient-to-r from-gray-800 to-transparent ml-6" />
+                  <div className="h-10 w-24 rounded-2xl bg-white/10 animate-pulse" />
+                </div>
+                <div className="flex gap-5 pb-6">
+                  {Array.from({ length: 8 }).map((__, cardIndex) => (
+                    <div key={`skeleton-card-${rowIndex}-${cardIndex}`} className="flex-shrink-0 w-40 lg:w-36 xl:w-32 2xl:w-36">
+                      <div className="relative aspect-[2/3] bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl overflow-hidden mb-4 shadow-xl shadow-black/40 ring-1 ring-white/5">
+                        <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-gray-700 to-gray-800" />
+                      </div>
+                      <div className="h-3 w-3/4 bg-white/10 rounded animate-pulse mb-2" />
+                      <div className="h-3 w-1/2 bg-white/10 rounded animate-pulse" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+        /* Content Rows */
+        (() => {
+          type Section = { id: string; element: ReactElement | null };
+          const sections: Section[] = [
+            {
+              id: 'continue_movies',
+              element: (
+                <MediaRow
+                  title="Continue Watching Movies"
+                  items={resumeMovies}
+                  onItemClick={handleItemClick}
+                  onBrowseClick={handleBrowseClick}
+                  onToggleFavorite={toggleFavorite}
+                  favChanging={favChanging}
+                  favoriteIds={favoriteIds}
+                  icon={
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  }
+                />
+              )
+            },
+            {
+              id: 'continue_tv',
+              element: (
+                <MediaRow
+                  title="Continue Watching TV"
+                  items={resumeSeries}
+                  onItemClick={handleItemClick}
+                  onBrowseClick={handleBrowseClick}
+                  onToggleFavorite={toggleFavorite}
+                  favChanging={favChanging}
+                  favoriteIds={favoriteIds}
+                  icon={
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  }
+                />
+              )
+            },
+            {
+              id: 'favorites',
+              element: favoriteItems.length > 0 ? (
+                <MediaRow
+                  title="Favorites"
+                  items={favoriteItems}
+                  onItemClick={handleItemClick}
+                  onBrowseClick={handleBrowseClick}
+                  onToggleFavorite={toggleFavorite}
+                  favChanging={favChanging}
+                  favoriteIds={favoriteIds}
+                  icon={
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+                    </svg>
+                  }
+                />
+              ) : null
+            },
+            {
+              id: 'trending_movies',
+              element: popularMovies.length > 0 ? (
+                <MediaRow
+                  title="Trending Movies"
+                  items={popularMovies}
+                  browseLink="/popular/movies"
+                  subtitle="Powered by TMDB"
+                  onItemClick={handleItemClick}
+                  onBrowseClick={handleBrowseClick}
+                  onToggleFavorite={toggleFavorite}
+                  favChanging={favChanging}
+                  favoriteIds={favoriteIds}
+                  icon={
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                    </svg>
+                  }
+                />
+              ) : null
+            },
+            {
+              id: 'popular_tv',
+              element: popularTVShows.length > 0 ? (
+                <MediaRow
+                  title="Popular TV Shows"
+                  items={popularTVShows}
+                  browseLink="/popular/tv"
+                  subtitle="Powered by TMDB"
+                  onItemClick={handleItemClick}
+                  onBrowseClick={handleBrowseClick}
+                  onToggleFavorite={toggleFavorite}
+                  favChanging={favChanging}
+                  favoriteIds={favoriteIds}
+                  icon={
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                    </svg>
+                  }
+                />
+              ) : null
+            },
+            {
+              id: 'latest_movies',
+              element: (
+                <MediaRow
+                  title="Latest Movies"
+                  items={latestMovies}
+                  browseLink="/browse?type=Movie"
+                  onItemClick={handleItemClick}
+                  onBrowseClick={handleBrowseClick}
+                  onToggleFavorite={toggleFavorite}
+                  favChanging={favChanging}
+                  favoriteIds={favoriteIds}
+                  icon={
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
+                    </svg>
+                  }
+                />
+              )
+            },
+            {
+              id: 'latest_episodes',
+              element: (
+                <MediaRow
+                  title="Latest Episodes"
+                  items={latestEpisodes}
+                  browseLink="/browse?type=Series"
+                  onItemClick={handleItemClick}
+                  onBrowseClick={handleBrowseClick}
+                  onToggleFavorite={toggleFavorite}
+                  favChanging={favChanging}
+                  favoriteIds={favoriteIds}
+                  icon={
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                  }
+                />
+              )
+            },
+            ...customSections.map(section => ({
+              id: section.id,
+              element: (
+                <MediaRow
+                  title={section.name}
+                  items={customSectionItems[section.id] || []}
+                  onItemClick={handleItemClick}
+                  onBrowseClick={handleBrowseClick}
+                  onToggleFavorite={toggleFavorite}
+                  favChanging={favChanging}
+                  favoriteIds={favoriteIds}
+                  subtitle="Custom filter"
+                  onRemove={() => removeCustomSection(section.id)}
+                  icon={
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L15 12.414V19a1 1 0 01-1.447.894l-4-2A1 1 0 019 17.999v-5.585L3.293 6.707A1 1 0 013 6V4z" />
+                    </svg>
+                  }
+                />
+              )
+            })),
+          ];
+
+          const sectionsById = new Map(sections.map(section => [section.id, section]));
+          const ordered = savedHomeSectionOrder
+            .map(id => sectionsById.get(id))
+            .filter((section): section is Section => section !== undefined);
+          const missing = sections.filter(section => !savedHomeSectionOrder.includes(section.id));
+
+          return [...ordered, ...missing]
+            .filter(section => section.element !== null && section.element !== undefined)
+            .map(section => (
+              <div key={section.id}>{section.element}</div>
+            ));
+        })()
         )}
-        {popularTVShows.length > 0 && (
-          <MediaRow
-            title="Popular TV Shows"
-            items={popularTVShows}
-            browseLink="/popular/tv"
-            subtitle="Powered by TMDB"
-            onItemClick={handleItemClick}
-            onBrowseClick={handleBrowseClick}
-            icon={
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-              </svg>
-            }
-          />
-        )}
-        <MediaRow
-          title="Latest Movies"
-          items={latestMovies}
-          browseLink="/browse?type=Movie"
-          onItemClick={handleItemClick}
-          onBrowseClick={handleBrowseClick}
-          icon={
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
-            </svg>
-          }
-        />
-        <MediaRow
-          title="Latest Episodes"
-          items={latestEpisodes}
-          browseLink="/browse?type=Series"
-          onItemClick={handleItemClick}
-          onBrowseClick={handleBrowseClick}
-          icon={
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-            </svg>
-          }
-        />
       </main>
 
       {/* Footer */}

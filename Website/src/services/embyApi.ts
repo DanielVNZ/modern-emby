@@ -215,8 +215,8 @@ class EmbyApiService {
     if (params.genres) queryParams.append('Genres', params.genres);
     if (params.years) queryParams.append('Years', params.years);
     if (params.anyProviderIdEquals) queryParams.append('AnyProviderIdEquals', params.anyProviderIdEquals);
-    // Always include essential fields for display
-    queryParams.append('Fields', params.fields || 'Genres,Overview,CommunityRating,OfficialRating,RunTimeTicks,ProductionYear,PremiereDate,Studios,ChildCount,ProviderIds,Path,MediaSources');
+    // Always include essential fields for display (include UserData so client can show favorites)
+    queryParams.append('Fields', params.fields || 'Genres,Overview,CommunityRating,OfficialRating,RunTimeTicks,ProductionYear,PremiereDate,Studios,ChildCount,ProviderIds,Path,MediaSources,UserData');
 
     const result = await this.request<ItemsResponse>(`/Users/${this.userId}/Items?${queryParams.toString()}`);
     
@@ -386,6 +386,19 @@ class EmbyApiService {
 
   async markUnplayed(itemId: string): Promise<void> {
     await this.request(`/Users/${this.userId}/PlayedItems/${itemId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Mark or unmark an item as favorite for the current user
+  async markFavorite(itemId: string): Promise<any> {
+    return this.request(`/Users/${this.userId}/FavoriteItems/${itemId}`, {
+      method: 'POST',
+    });
+  }
+
+  async unmarkFavorite(itemId: string): Promise<void> {
+    return this.request(`/Users/${this.userId}/FavoriteItems/${itemId}`, {
       method: 'DELETE',
     });
   }

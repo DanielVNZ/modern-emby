@@ -87,6 +87,7 @@ export interface EmbyItem {
   PremiereDate?: string;
   // Season count for Series items
   ChildCount?: number;
+  SeasonCount?: number;
   UserData?: {
     PlaybackPositionTicks: number;
     PlayCount: number;

@@ -29,6 +29,9 @@ export function useTVNavigation(options: {
 
   // Get focusable elements within a container
   const getFocusableElements = useCallback((container: HTMLElement | Document = document): HTMLElement[] => {
+    // If reorder mode is active globally, restrict focusable elements to the reorder controls
+    const reorderActive = document.body.getAttribute('data-reorder-mode') === 'true';
+
     const selector = [
       'button:not([disabled]):not([tabindex="-1"])',
       '[tabindex="0"]',
@@ -39,27 +42,35 @@ export function useTVNavigation(options: {
       '[role="menuitem"]:not([disabled]):not([tabindex="-1"])',
       '[role="option"]:not([disabled]):not([tabindex="-1"])',
     ].join(', ');
-    
+
     const elements = Array.from(container.querySelectorAll<HTMLElement>(selector));
-    
-    // Filter out hidden elements and elements within hidden containers
-    return elements.filter(el => {
+
+    // If reorder mode is active, only keep elements that are part of reorder UI
+    const filtered = elements.filter(el => {
+      // Keep the Reorder button(s) (marked focusable-item) and draggable section wrappers
+      if (reorderActive) {
+        if (el.classList.contains('focusable-item')) return true;
+        if (el.hasAttribute('data-draggable-sectionid')) return true;
+        return false;
+      }
+
+      // Otherwise do the normal visibility checks
       const rect = el.getBoundingClientRect();
       const style = window.getComputedStyle(el);
-      
+
       // Check if element is visible
       if (rect.width === 0 || rect.height === 0) return false;
       if (style.visibility === 'hidden' || style.display === 'none') return false;
       if (style.opacity === '0') return false;
-      
+
       // Check if element is within visible viewport (with some margin for scroll containers)
       const viewportWidth = window.innerWidth;
       const viewportHeight = window.innerHeight;
       const margin = 500; // Allow elements in scroll containers
-      
+
       if (rect.right < -margin || rect.left > viewportWidth + margin) return false;
       if (rect.bottom < -margin || rect.top > viewportHeight + margin) return false;
-      
+
       // Check if any parent is hidden
       let parent = el.parentElement;
       while (parent) {
@@ -69,9 +80,11 @@ export function useTVNavigation(options: {
         }
         parent = parent.parentElement;
       }
-      
+
       return true;
     });
+
+    return filtered;
   }, []);
 
   // Find the best element in a given direction using spatial navigation
@@ -82,6 +95,10 @@ export function useTVNavigation(options: {
   ): HTMLElement | null => {
     const elements = getFocusableElements(container || document);
     const currentRect = currentElement.getBoundingClientRect();
+    const nearPageBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 200;
+    const currentGroup = currentElement.closest('[data-tv-group]')?.getAttribute('data-tv-group') || '';
+    const currentOrderAttr = currentElement.getAttribute('data-tv-order');
+    const currentOrder = currentOrderAttr ? Number(currentOrderAttr) : Number.NaN;
     
     // Get center point of current element
     const currentCenterX = currentRect.left + currentRect.width / 2;
@@ -137,6 +154,67 @@ export function useTVNavigation(options: {
     const currentIsInCardRow = isInCardRow(currentElement);
     const currentIsInHeader = isInHeader(currentElement);
 
+    // If on a card and pressing UP, prefer its internal "bottom-only" control (favorite star)
+    if (direction === 'up' && currentElement.classList.contains('focusable-card')) {
+      const innerFav = currentElement.querySelector<HTMLElement>('[data-tv-bottom-only]');
+      if (innerFav) {
+        return innerFav;
+      }
+    }
+
+    // If navigating vertically from a card row, prefer the nearest header button,
+    // but fall back to the next row container if no header exists for that section.
+    if (direction === 'down' && currentIsInCardRow) {
+      const headerCandidates = elements.filter(el => {
+        if (!isRowHeaderButton(el)) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.top > currentRect.bottom - 10;
+      });
+
+      let headerCandidate: HTMLElement | null = null;
+      if (headerCandidates.length > 0) {
+        headerCandidates.sort((a, b) => {
+          const ra = a.getBoundingClientRect();
+          const rb = b.getBoundingClientRect();
+          const da = ra.top - currentRect.bottom;
+          const db = rb.top - currentRect.bottom;
+          if (da !== db) return da - db;
+          return Math.abs(ra.left - currentRect.left) - Math.abs(rb.left - currentRect.left);
+        });
+        headerCandidate = headerCandidates[0];
+      }
+
+      // Find the nearest next row container and its first focusable item
+      const rowContainerSet = new Set<HTMLElement>();
+      for (const el of elements) {
+        const container = getRowContainer(el);
+        if (container) rowContainerSet.add(container);
+      }
+      const rowContainers = Array.from(rowContainerSet);
+      rowContainers.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+      const nextRowContainer = rowContainers.find(c => c.getBoundingClientRect().top > currentRect.bottom - 10) || null;
+      let rowCandidate: HTMLElement | null = null;
+      if (nextRowContainer) {
+        const rowElements = Array.from(nextRowContainer.querySelectorAll<HTMLElement>(
+          'button:not([disabled]):not([tabindex="-1"]), [tabindex="0"]'
+        )).filter(el => {
+          const style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden') return false;
+          if (el.hasAttribute('data-tv-bottom-only')) return false;
+          return true;
+        });
+        if (rowElements.length > 0) rowCandidate = rowElements[0];
+      }
+
+      if (headerCandidate && rowCandidate) {
+        const hd = headerCandidate.getBoundingClientRect().top - currentRect.bottom;
+        const rd = rowCandidate.getBoundingClientRect().top - currentRect.bottom;
+        return hd <= rd ? headerCandidate : rowCandidate;
+      }
+      if (headerCandidate) return headerCandidate;
+      if (rowCandidate) return rowCandidate;
+    }
+
     // For horizontal navigation in a row container, use DOM order instead of spatial
     if ((direction === 'left' || direction === 'right') && currentRowContainer) {
       // Get all focusable elements in this row container
@@ -144,7 +222,9 @@ export function useTVNavigation(options: {
         'button:not([disabled]):not([tabindex="-1"]), [tabindex="0"]'
       )).filter(el => {
         const style = window.getComputedStyle(el);
-        return style.display !== 'none' && style.visibility !== 'hidden';
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+        if (el.hasAttribute('data-tv-bottom-only')) return false;
+        return true;
       });
       
       const currentIndex = rowElements.indexOf(currentElement);
@@ -158,178 +238,246 @@ export function useTVNavigation(options: {
       // (to allow moving to elements outside the row)
     }
 
-    let bestElement: HTMLElement | null = null;
-    let bestScore = Infinity;
+    // Special-case: if we're in the top header and pressing DOWN, prefer the nearest focusable below
+    if (direction === 'down' && currentIsInHeader) {
+      try {
+        const allFocusables = getFocusableElements(document).filter(el => el.getBoundingClientRect().height > 0);
 
-    for (const element of elements) {
-      if (element === currentElement) continue;
+        // Only consider those that are visually below the header
+        const focusables = allFocusables.filter(el => el.getBoundingClientRect().top > currentRect.bottom - 10);
+        if (focusables.length > 0) {
+          // Prioritize by:
+          // 1) element with aria-pressed attribute (like the Reorder button)
+          // 2) element inside <main> (content controls)
+          // 3) nearest by top/left
 
-      const rect = element.getBoundingClientRect();
-      const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
-
-      const dx = centerX - currentCenterX;
-      const dy = centerY - currentCenterY;
-
-      // Check if element is in the correct direction
-      let isInDirection = false;
-      let primaryDistance = 0;
-      let secondaryDistance = 0;
-
-      // Check if both elements are in the same row container
-      const targetRowContainer = getRowContainer(element);
-      const sameRow = currentRowContainer && currentRowContainer === targetRowContainer;
-
-      // For same-row horizontal navigation, use a very small threshold
-      // For cross-row, use a larger threshold
-      const threshold = sameRow ? 1 : 10;
-
-      // Check if elements are roughly on the same visual row (within 80px vertically)
-      // This is more generous to handle cards that might be slightly offset
-      const roughlySameRow = Math.abs(dy) < 80;
-
-      switch (direction) {
-        case 'up':
-          // For up, the element must be clearly above (not just slightly)
-          // When in a card row, be more strict - we want to go to the row header
-          if (currentIsInCardRow && !sameRow) {
-            isInDirection = dy < -20; // Must be clearly above
-          } else {
-            isInDirection = dy < -threshold;
+          const ariaPressed = focusables.filter(el => el.hasAttribute('aria-pressed'));
+          if (ariaPressed.length > 0) {
+            ariaPressed.sort((a, b) => (a.getBoundingClientRect().top - b.getBoundingClientRect().top));
+            return ariaPressed[0];
           }
-          primaryDistance = Math.abs(dy);
-          secondaryDistance = Math.abs(dx);
-          break;
-        case 'down':
-          isInDirection = dy > threshold;
-          primaryDistance = Math.abs(dy);
-          secondaryDistance = Math.abs(dx);
-          break;
-        case 'left':
-          // For left navigation: element must be to the left
-          // Be more permissive with the threshold - any element clearly to the left
-          if (sameRow || roughlySameRow) {
-            isInDirection = dx < -1; // Just needs to be to the left
-          } else {
-            isInDirection = dx < -threshold && Math.abs(dy) < 100;
-          }
-          primaryDistance = Math.abs(dx);
-          secondaryDistance = (sameRow || roughlySameRow) ? 0 : Math.abs(dy);
-          break;
-        case 'right':
-          // For right navigation: element must be to the right
-          // Be more permissive with the threshold - any element clearly to the right
-          if (sameRow || roughlySameRow) {
-            isInDirection = dx > 1; // Just needs to be to the right
-          } else {
-            isInDirection = dx > threshold && Math.abs(dy) < 100;
-          }
-          primaryDistance = Math.abs(dx);
-          secondaryDistance = (sameRow || roughlySameRow) ? 0 : Math.abs(dy);
-          break;
-      }
 
-      if (!isInDirection) continue;
+          const inMain = focusables.filter(el => el.closest('main'));
+          if (inMain.length > 0) {
+            inMain.sort((a, b) => {
+              const dy = a.getBoundingClientRect().top - b.getBoundingClientRect().top;
+              if (dy !== 0) return dy;
+              return a.getBoundingClientRect().left - b.getBoundingClientRect().left;
+            });
+            return inMain[0];
+          }
 
-      // Calculate score - lower is better
-      // Heavily favor elements in the same row for horizontal navigation
-      let score = primaryDistance;
-      
-      if (direction === 'left' || direction === 'right') {
-        if (sameRow) {
-          // Same row container: use only horizontal distance with massive bonus
-          score = primaryDistance - 50000;
-        } else if (roughlySameRow) {
-          // Visually same row: still strong preference
-          score = primaryDistance - 10000;
-        } else {
-          // Different row: penalize very heavily - we almost never want this
-          score = primaryDistance + (secondaryDistance * 50) + 5000;
+          // fallback: closest by top then left
+          focusables.sort((a, b) => {
+            const dy = a.getBoundingClientRect().top - b.getBoundingClientRect().top;
+            if (dy !== 0) return dy;
+            return a.getBoundingClientRect().left - b.getBoundingClientRect().left;
+          });
+          return focusables[0];
         }
-      } else {
-        // Vertical navigation
-        score = primaryDistance + (secondaryDistance * 0.3);
-        
-        // When navigating DOWN from a card row, prioritize header buttons (like "See All")
-        // over cards in the next row
-        if (direction === 'down' && currentIsInCardRow) {
-          const targetIsHeaderButton = isRowHeaderButton(element);
-          const targetIsInCardRow = isInCardRow(element);
-          
-          if (targetIsHeaderButton && !targetIsInCardRow) {
-            // Give a significant bonus to header buttons
-            score -= 500;
-          }
-        }
-        
-        // When navigating UP from a card row, STRONGLY prioritize the row's header
-        if (direction === 'up' && currentIsInCardRow) {
-          const targetIsHeaderButton = isRowHeaderButton(element);
-          const targetIsInCardRow = isInCardRow(element);
-          
-          if (targetIsHeaderButton && !targetIsInCardRow) {
-            // Very strong bonus for header buttons when going up from cards
-            score -= 1000;
-          }
-          
-          // Penalize other cards in different rows
-          if (targetIsInCardRow && !sameRow) {
-            score += 500;
-          }
-        }
-        
-        // When navigating DOWN from a header button (like "See All"), 
-        // prioritize the first card in the row below (leftmost)
-        // and HEAVILY penalize other header buttons
-        if (direction === 'down' && isRowHeaderButton(currentElement)) {
-          const targetIsInCardRow = isInCardRow(element);
-          const targetIsHeaderButton = isRowHeaderButton(element);
-          
-          if (targetIsInCardRow) {
-            // Give massive bonus to cards - we almost always want to go to cards
-            score -= 2000;
-            // STRONG bonus for cards on the left side - we want the FIRST card
-            // Use absolute position: leftmost card wins regardless of distance
-            score += rect.left * 2;
-          } else if (targetIsHeaderButton) {
-            // Heavily penalize other header buttons when going down from a header
-            // We want to go to the cards, not to the next "See All" button
-            score += 3000;
-          }
-        }
-
-        // When navigating DOWN from the top header menu, prioritize primary-action buttons (Play Now)
-        if (direction === 'down' && currentIsInHeader) {
-          if (isPrimaryAction(element)) {
-            // Massive bonus to go to Play Now from header
-            score -= 5000;
-          }
-        }
-
-        // When navigating UP from a card row (like Continue Watching), prioritize primary-action buttons
-        if (direction === 'up' && currentIsInCardRow) {
-          if (isPrimaryAction(element)) {
-            // Strong bonus to go to Play Now when pressing up from content rows
-            score -= 3000;
-          }
-        }
-        
-        // Bonus for elements that overlap horizontally
-        const horizontalOverlap = Math.max(0, 
-          Math.min(currentRect.right, rect.right) - Math.max(currentRect.left, rect.left)
-        );
-        if (horizontalOverlap > 0) {
-          score -= horizontalOverlap * 0.2;
-        }
-      }
-
-      if (score < bestScore) {
-        bestScore = score;
-        bestElement = element;
+      } catch (err) {
+        // ignore errors
       }
     }
 
-    return bestElement;
+    const findBest = (candidateElements: HTMLElement[]) => {
+      let bestElement: HTMLElement | null = null;
+      let bestScore = Infinity;
+
+      for (const element of candidateElements) {
+        if (element === currentElement) continue;
+        if (element.hasAttribute('data-tv-bottom-only')) {
+          if (direction === 'down' && !nearPageBottom) {
+            continue;
+          }
+          if (direction === 'left' || direction === 'right') {
+            continue;
+          }
+        }
+        if (element.getAttribute('data-tv-requires') === 'save-after-signout') {
+          const allowSave = document.body.getAttribute('data-tv-allow-save') === 'true';
+          if (!allowSave) continue;
+        }
+
+        const rect = element.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+
+        const dx = centerX - currentCenterX;
+        const dy = centerY - currentCenterY;
+
+        // Check if element is in the correct direction
+        let isInDirection = false;
+        let primaryDistance = 0;
+        let secondaryDistance = 0;
+
+        // Check if both elements are in the same row container
+        const targetRowContainer = getRowContainer(element);
+        const sameRow = currentRowContainer && currentRowContainer === targetRowContainer;
+
+        // For same-row horizontal navigation, use a very small threshold
+        // For cross-row, use a larger threshold
+        const threshold = sameRow ? 1 : 10;
+
+        // Check if elements are roughly on the same visual row (within 80px vertically)
+        // This is more generous to handle cards that might be slightly offset
+        const roughlySameRow = Math.abs(dy) < 80;
+
+        switch (direction) {
+          case 'up':
+            // For up, the element must be clearly above (not just slightly)
+            // When in a card row, be more strict - we want to go to the row header
+            if (currentIsInCardRow && !sameRow) {
+              isInDirection = dy < -20; // Must be clearly above
+            } else {
+              isInDirection = dy < -threshold;
+            }
+            primaryDistance = Math.abs(dy);
+            secondaryDistance = Math.abs(dx);
+            break;
+          case 'down':
+            isInDirection = dy > threshold;
+            primaryDistance = Math.abs(dy);
+            secondaryDistance = Math.abs(dx);
+            break;
+          case 'left':
+            // For left navigation: element must be to the left
+            // Be more permissive with the threshold - any element clearly to the left
+            if (sameRow || roughlySameRow) {
+              isInDirection = dx < -1; // Just needs to be to the left
+            } else {
+              isInDirection = dx < -threshold && Math.abs(dy) < 100;
+            }
+            primaryDistance = Math.abs(dx);
+            secondaryDistance = (sameRow || roughlySameRow) ? 0 : Math.abs(dy);
+            break;
+          case 'right':
+            // For right navigation: element must be to the right
+            // Be more permissive with the threshold - any element clearly to the right
+            if (sameRow || roughlySameRow) {
+              isInDirection = dx > 1; // Just needs to be to the right
+            } else {
+              isInDirection = dx > threshold && Math.abs(dy) < 100;
+            }
+            primaryDistance = Math.abs(dx);
+            secondaryDistance = (sameRow || roughlySameRow) ? 0 : Math.abs(dy);
+            break;
+        }
+
+        if (!isInDirection) continue;
+
+        // Calculate score - lower is better
+        // Heavily favor elements in the same row for horizontal navigation
+        let score = primaryDistance;
+        
+        if (direction === 'left' || direction === 'right') {
+          if (sameRow) {
+            // Same row container: use only horizontal distance with massive bonus
+            score = primaryDistance - 50000;
+          } else if (roughlySameRow) {
+            // Visually same row: still strong preference
+            score = primaryDistance - 10000;
+          } else {
+            // Different row: penalize very heavily - we almost never want this
+            score = primaryDistance + (secondaryDistance * 50) + 5000;
+          }
+        } else {
+          // Vertical navigation
+          score = primaryDistance + (secondaryDistance * 0.3);
+          
+          // When navigating UP from a card row, still penalize other cards in different rows
+          if (direction === 'up' && currentIsInCardRow) {
+            const targetIsInCardRow = isInCardRow(element);
+            if (targetIsInCardRow && !sameRow) {
+              score += 500;
+            }
+          }
+          
+          // When navigating DOWN from a header button (like "See All"), 
+          // prioritize the first card in the row below (leftmost)
+          // and HEAVILY penalize other header buttons
+          if (direction === 'down' && isRowHeaderButton(currentElement)) {
+            const targetIsInCardRow = isInCardRow(element);
+            const targetIsHeaderButton = isRowHeaderButton(element);
+            
+            if (targetIsInCardRow) {
+              // Give massive bonus to cards - we almost always want to go to cards
+              score -= 2000;
+              // STRONG bonus for cards on the left side - we want the FIRST card
+              // Use absolute position: leftmost card wins regardless of distance
+              score += rect.left * 2;
+            } else if (targetIsHeaderButton) {
+              // Heavily penalize other header buttons when going down from a header
+              // We want to go to the cards, not to the next "See All" button
+              score += 3000;
+            }
+          }
+
+          // When navigating DOWN from the top header menu, prioritize primary-action buttons (Play Now)
+          // However, if there are explicit TV-focused controls (focusable-item) we want to prefer those
+          if (direction === 'down' && currentIsInHeader) {
+            if (element.classList.contains('focusable-item')) {
+              // Highest priority: explicit focusable items (like Reorder button)
+              score -= 6000;
+            } else if (isPrimaryAction(element)) {
+              // Next priority: primary action (Play Now)
+              score -= 5000;
+            }
+          }
+
+          // When navigating UP from a card row (like Continue Watching), prioritize primary-action buttons
+          if (direction === 'up' && currentIsInCardRow) {
+            if (isPrimaryAction(element)) {
+              // Strong bonus to go to Play Now when pressing up from content rows
+              score -= 3000;
+            }
+          }
+          
+          // Bonus for elements that overlap horizontally
+          const horizontalOverlap = Math.max(0, 
+            Math.min(currentRect.right, rect.right) - Math.max(currentRect.left, rect.left)
+          );
+          if (horizontalOverlap > 0) {
+            score -= horizontalOverlap * 0.2;
+          }
+        }
+
+        if (score < bestScore) {
+          bestScore = score;
+          bestElement = element;
+        }
+      }
+
+      return bestElement;
+    };
+
+    if (currentGroup && (direction === 'up' || direction === 'down')) {
+      const orderedGroupElements = elements
+        .filter(el => el.closest('[data-tv-group]')?.getAttribute('data-tv-group') === currentGroup)
+        .filter(el => {
+          const orderAttr = el.getAttribute('data-tv-order');
+          return orderAttr !== null && !Number.isNaN(Number(orderAttr));
+        })
+        .sort((a, b) => Number(a.getAttribute('data-tv-order')) - Number(b.getAttribute('data-tv-order')));
+
+      if (!Number.isNaN(currentOrder) && orderedGroupElements.length > 0) {
+        const currentIndex = orderedGroupElements.findIndex(el => el === currentElement);
+        if (currentIndex !== -1) {
+          const nextIndex = direction === 'down' ? currentIndex + 1 : currentIndex - 1;
+          if (nextIndex >= 0 && nextIndex < orderedGroupElements.length) {
+            return orderedGroupElements[nextIndex];
+          }
+        }
+      }
+    }
+
+    if (currentGroup) {
+      const groupElements = elements.filter(el => el.closest('[data-tv-group]')?.getAttribute('data-tv-group') === currentGroup);
+      const bestInGroup = findBest(groupElements);
+      if (bestInGroup) return bestInGroup;
+    }
+
+    return findBest(elements);
   }, [getFocusableElements]);
 
   // Focus an element and scroll it into view

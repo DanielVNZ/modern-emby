@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTVNavigation } from '../hooks/useTVNavigation';
 import { embyApi } from '../services/embyApi';
@@ -8,6 +8,28 @@ export function Settings() {
   const navigate = useNavigate();
   const { logout } = useAuth();
   const backButtonRef = useRef<HTMLButtonElement>(null);
+  const HOME_SECTIONS_KEY = 'home_customSections';
+  const defaultHomeSections = [
+    { id: 'continue_movies', label: 'Continue Watching Movies' },
+    { id: 'continue_tv', label: 'Continue Watching TV' },
+    { id: 'favorites', label: 'Favorites' },
+    { id: 'trending_movies', label: 'Trending Movies' },
+    { id: 'popular_tv', label: 'Popular TV Shows' },
+    { id: 'latest_movies', label: 'Latest Movies' },
+    { id: 'latest_episodes', label: 'Latest Episodes' },
+  ];
+  const [customHomeSections, setCustomHomeSections] = useState<{ id: string; label: string; }[]>([]);
+  const allHomeSections = useMemo(
+    () => [...defaultHomeSections, ...customHomeSections],
+    [customHomeSections]
+  );
+
+  const normalizeHomeOrder = (order: string[], sections: { id: string }[]) => {
+    const known = new Set(sections.map(section => section.id));
+    const normalized = order.filter(id => known.has(id));
+    const missing = sections.map(section => section.id).filter(id => !normalized.includes(id));
+    return [...normalized, ...missing];
+  };
   
   useTVNavigation({
     onBack: () => {
@@ -43,6 +65,23 @@ export function Settings() {
   const [showTmdbKey, setShowTmdbKey] = useState(false);
   const [availableGenres, setAvailableGenres] = useState<string[]>([]);
   const [availableYears, setAvailableYears] = useState<number[]>([]);
+  const [homeSectionOrder, setHomeSectionOrder] = useState<string[]>(() => {
+    const saved = localStorage.getItem('emby_homeSectionOrder');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return normalizeHomeOrder(
+            parsed.filter((id: unknown) => typeof id === 'string') as string[],
+            defaultHomeSections
+          );
+        }
+      } catch (error) {
+        console.error('Failed to parse home section order:', error);
+      }
+    }
+    return defaultHomeSections.map(section => section.id);
+  });
 
   // Focus back button on mount
   useEffect(() => {
@@ -50,6 +89,31 @@ export function Settings() {
       backButtonRef.current?.focus();
     }, 100);
   }, []);
+
+  // Load custom home sections (from Browse filter shortcuts)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(HOME_SECTIONS_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed)) {
+        const mapped = parsed
+          .filter((s: any) => s && typeof s.id === 'string' && typeof s.name === 'string')
+          .map((s: any) => ({ id: s.id, label: s.name }));
+        setCustomHomeSections(mapped);
+      }
+    } catch (e) {
+      console.error('Failed to load custom home sections:', e);
+    }
+  }, []);
+
+  // Ensure custom sections are included in ordering
+  useEffect(() => {
+    const normalized = normalizeHomeOrder(homeSectionOrder, allHomeSections);
+    if (JSON.stringify(normalized) !== JSON.stringify(homeSectionOrder)) {
+      setHomeSectionOrder(normalized);
+      localStorage.setItem('emby_homeSectionOrder', JSON.stringify(normalized));
+    }
+  }, [customHomeSections]);
 
   // Load genres and years
   useEffect(() => {
@@ -86,6 +150,67 @@ export function Settings() {
     navigate('/home');
   };
 
+  const renderSaveButton = (className: string, order: number) => (
+    <div className={`flex justify-center ${className}`}>
+      <button
+        onClick={handleSave}
+        data-tv-group="home-settings-save"
+        data-tv-order={order}
+        data-tv-requires="save-after-signout"
+        className="px-10 py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-2xl shadow-lg shadow-blue-600/30 transition-all focusable-tab flex items-center gap-3"
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+        </svg>
+        Save & Return Home
+      </button>
+    </div>
+  );
+
+  const getVisibleHomeSections = () => {
+    const hasFavorites = localStorage.getItem('emby_hasFavorites') === 'true';
+    const hasPopularMovies = localStorage.getItem('emby_hasPopularMovies') === 'true';
+    const hasPopularTV = localStorage.getItem('emby_hasPopularTV') === 'true';
+
+    return allHomeSections.filter(section => {
+      if (section.id === 'favorites') return hasFavorites;
+      if (section.id === 'trending_movies') return hasPopularMovies;
+      if (section.id === 'popular_tv') return hasPopularTV;
+      return true;
+    });
+  };
+
+  const getVisibleOrder = (order: string[]) => {
+    const visibleSections = getVisibleHomeSections();
+    const visibleIds = new Set(visibleSections.map(section => section.id));
+    const normalized = order.filter(id => visibleIds.has(id));
+    const missing = visibleSections
+      .map(section => section.id)
+      .filter(id => !normalized.includes(id));
+    return [...normalized, ...missing];
+  };
+
+  const persistHomeSectionOrder = (order: string[]) => {
+    const normalized = getVisibleOrder(order);
+    setHomeSectionOrder(normalized);
+    localStorage.setItem('emby_homeSectionOrder', JSON.stringify(normalized));
+  };
+
+  const moveHomeSection = (sectionId: string, direction: 'up' | 'down') => {
+    const visibleOrder = getVisibleOrder(homeSectionOrder);
+    const index = visibleOrder.indexOf(sectionId);
+    if (index === -1) return;
+    const swapIndex = direction === 'up' ? index - 1 : index + 1;
+    if (swapIndex < 0 || swapIndex >= visibleOrder.length) return;
+    const updated = [...visibleOrder];
+    [updated[index], updated[swapIndex]] = [updated[swapIndex], updated[index]];
+    persistHomeSectionOrder(updated);
+  };
+
+  const resetHomeSectionOrder = () => {
+    persistHomeSectionOrder(getVisibleHomeSections().map(section => section.id));
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950">
       {/* Header */}
@@ -106,6 +231,8 @@ export function Settings() {
 
       {/* Content */}
       <div className="max-w-4xl mx-auto px-6 py-8">
+        {renderSaveButton('mb-8', 901)}
+
         {/* Home Screen Section */}
         <section className="mb-10">
           <div className="flex items-center gap-3 mb-6">
@@ -162,6 +289,8 @@ export function Settings() {
                           setFeaturedMediaType(newValue);
                           localStorage.setItem('emby_featuredMediaType', JSON.stringify(newValue));
                         }}
+                        data-tv-group="home-settings-featured"
+                        data-tv-order={1}
                         className={`flex items-center gap-3 px-5 py-3 rounded-xl transition-all focusable-tab ${
                           featuredMediaType.movies 
                             ? 'bg-blue-600 text-white' 
@@ -185,6 +314,8 @@ export function Settings() {
                           setFeaturedMediaType(newValue);
                           localStorage.setItem('emby_featuredMediaType', JSON.stringify(newValue));
                         }}
+                        data-tv-group="home-settings-featured"
+                        data-tv-order={2}
                         className={`flex items-center gap-3 px-5 py-3 rounded-xl transition-all focusable-tab ${
                           featuredMediaType.tvShows 
                             ? 'bg-blue-600 text-white' 
@@ -214,6 +345,8 @@ export function Settings() {
                           setFeaturedGenre(e.target.value);
                           localStorage.setItem('emby_featuredGenre', e.target.value);
                         }}
+                        data-tv-group="home-settings-featured"
+                        data-tv-order={3}
                         className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500 focusable-tab appearance-none cursor-pointer"
                       >
                         <option value="">Any Genre</option>
@@ -230,6 +363,8 @@ export function Settings() {
                           setFeaturedYear(e.target.value);
                           localStorage.setItem('emby_featuredYear', e.target.value);
                         }}
+                        data-tv-group="home-settings-featured"
+                        data-tv-order={4}
                         className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500 focusable-tab appearance-none cursor-pointer"
                       >
                         <option value="">Any Year</option>
@@ -242,6 +377,76 @@ export function Settings() {
                 </div>
               </>
             )}
+          </div>
+
+          <div className="bg-gray-900/50 rounded-2xl border border-gray-800 overflow-hidden mt-6">
+            <div className="p-5 border-b border-gray-800 flex items-center justify-between gap-4">
+              <div>
+                <p className="text-white font-medium">Home Section Order</p>
+                <p className="text-sm text-gray-500 mt-1">Move sections up or down to customize your home page</p>
+              </div>
+              <button
+                onClick={resetHomeSectionOrder}
+                data-tv-group="home-settings-order"
+                className="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-300 rounded-xl transition-colors focusable-tab"
+                tabIndex={0}
+              >
+                Reset
+              </button>
+            </div>
+            <div className="divide-y divide-gray-800">
+              {(() => {
+                const visibleOrder = getVisibleOrder(homeSectionOrder);
+                return visibleOrder.map((sectionId, index) => {
+                const section = allHomeSections.find(item => item.id === sectionId);
+                if (!section) return null;
+                const isFirst = index === 0;
+                const isLast = index === visibleOrder.length - 1;
+                return (
+                  <div key={section.id} className="flex items-center justify-between p-5 gap-4" data-tv-group="home-settings-order">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-gray-800 text-gray-400 flex items-center justify-center text-sm font-semibold">
+                        {index + 1}
+                      </div>
+                      <p className="text-white font-medium">{section.label}</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => moveHomeSection(section.id, 'up')}
+                        data-tv-group="home-settings-order"
+                        className={`px-4 py-2 rounded-xl transition-colors focusable-tab flex items-center gap-2 ${
+                          isFirst ? 'bg-gray-800 text-gray-600 cursor-not-allowed' : 'bg-blue-600/20 text-blue-300 hover:bg-blue-600/30'
+                        }`}
+                        tabIndex={isFirst ? -1 : 0}
+                        disabled={isFirst}
+                        aria-label={`Move ${section.label} up`}
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                        </svg>
+                        Up
+                      </button>
+                      <button
+                        onClick={() => moveHomeSection(section.id, 'down')}
+                        data-tv-group="home-settings-order"
+                        className={`px-4 py-2 rounded-xl transition-colors focusable-tab flex items-center gap-2 ${
+                          isLast ? 'bg-gray-800 text-gray-600 cursor-not-allowed' : 'bg-blue-600/20 text-blue-300 hover:bg-blue-600/30'
+                        }`}
+                        tabIndex={isLast ? -1 : 0}
+                        disabled={isLast}
+                        aria-label={`Move ${section.label} down`}
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                        Down
+                      </button>
+                    </div>
+                  </div>
+                );
+              });
+              })()}
+            </div>
           </div>
         </section>
 
@@ -266,8 +471,8 @@ export function Settings() {
                   href="https://www.themoviedb.org/settings/api" 
                   target="_blank" 
                   rel="noopener noreferrer"
-                  className="text-green-400 hover:text-green-300 underline focusable-tab"
-                  tabIndex={0}
+                  className="text-green-400 hover:text-green-300 underline"
+                  tabIndex={-1}
                 >
                   themoviedb.org
                 </a>
@@ -434,6 +639,9 @@ export function Settings() {
             <div className="p-5">
               <button
                 onClick={handleLogout}
+                onFocus={() => document.body.setAttribute('data-tv-allow-save', 'true')}
+                data-tv-group="home-settings-account"
+                data-tv-order={900}
                 className="w-full sm:w-auto px-6 py-3 bg-red-600/20 hover:bg-red-600/30 text-red-400 font-medium rounded-xl transition-colors focusable-tab flex items-center justify-center gap-2"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -446,17 +654,7 @@ export function Settings() {
         </section>
 
         {/* Save Button */}
-        <div className="sticky bottom-6 flex justify-center">
-          <button
-            onClick={handleSave}
-            className="px-10 py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-2xl shadow-lg shadow-blue-600/30 transition-all focusable-tab flex items-center gap-3"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-            Save & Return Home
-          </button>
-        </div>
+        {renderSaveButton('mt-6', 902)}
 
         {/* Bottom spacing for TV */}
         <div className="h-20" />

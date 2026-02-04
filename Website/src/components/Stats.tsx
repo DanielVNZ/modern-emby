@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { embyApi } from '../services/embyApi';
 import type { EmbyItem } from '../types/emby.types';
-import { LoadingScreen } from './LoadingScreen';
+// Inline skeletons replace full-screen loading
 import { useTVNavigation } from '../hooks/useTVNavigation';
 
 interface WatchStats {
@@ -167,7 +167,54 @@ export function Stats() {
   };
 
   if (isLoading) {
-    return <LoadingScreen />;
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950">
+        <header className="sticky top-0 z-40 bg-gray-950/95 backdrop-blur-sm border-b border-gray-800">
+          <div className="max-w-7xl mx-auto px-6 py-4">
+            <div className="flex items-center gap-4">
+              <div className="w-10 h-10 rounded-full bg-white/10" />
+              <div>
+                <div className="h-7 w-56 bg-white/10 rounded mb-2 animate-pulse" />
+                <div className="h-4 w-72 bg-white/10 rounded animate-pulse" />
+              </div>
+            </div>
+          </div>
+        </header>
+        <main className="max-w-7xl mx-auto px-6 py-8">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="bg-white/5 rounded-2xl p-6 border border-white/10">
+                <div className="h-6 w-32 bg-white/10 rounded mb-4 animate-pulse" />
+                <div className="h-8 w-24 bg-white/10 rounded mb-2 animate-pulse" />
+                <div className="h-3 w-40 bg-white/10 rounded animate-pulse" />
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div key={i} className="bg-white/5 rounded-2xl p-6 border border-white/10">
+                <div className="h-6 w-40 bg-white/10 rounded mb-4 animate-pulse" />
+                {Array.from({ length: 5 }).map((__, j) => (
+                  <div key={j} className="h-4 w-full bg-white/10 rounded mb-3 animate-pulse" />
+                ))}
+              </div>
+            ))}
+          </div>
+          <div className="mt-8 bg-white/5 rounded-2xl p-6 border border-white/10">
+            <div className="h-6 w-40 bg-white/10 rounded mb-4 animate-pulse" />
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i}>
+                  <div className="aspect-[2/3] rounded-lg bg-gradient-to-br from-gray-800 to-gray-900 animate-pulse mb-2" />
+                  <div className="h-4 bg-white/10 rounded w-10/12 mb-1 animate-pulse" />
+                  <div className="h-3 bg-white/10 rounded w-8/12 animate-pulse" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </main>
+      </div>
+    );
   }
 
   if (!stats) {
@@ -358,13 +405,13 @@ export function Stats() {
                 return (
                   <button
                     key={item.Id}
-                    onClick={() => navigate(`/details/${item.Id}`)}
+                    onClick={() => navigate(`/details/${item.Id}`, { state: { mediaType: item.Type } })}
                     className="cursor-pointer group text-left focusable-card"
                     tabIndex={0}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
-                        navigate(`/details/${item.Id}`);
+                        navigate(`/details/${item.Id}`, { state: { mediaType: item.Type } });
                       }
                     }}
                   >
