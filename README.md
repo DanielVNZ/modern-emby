@@ -26,7 +26,9 @@ Built with a **Direct Play Focus**, it bypasses server-side transcoding to deliv
 | :--- | :--- |
 | **Modern UI/UX:** Silky smooth React transitions designed for both the desktop mouse and the "10-foot" couch experience. (kind of lol) | **Direct Play Focus:** No transcoding, no quality loss. Aether requests original streams for maximum performance. |
 | **TV-First Navigation:** Full D-pad and keyboard support with optimized focus handling for Android TV. | **Stats for Nerds:** Real-time monitoring of bitrates, resolution, and buffering health. |
-| **Dynamic Home:** Smart *Continue Watching* and personalized recommendations synced with your Emby account. | **Rust-Powered:** Lightweight, secure, blazing-fast desktop builds via Tauri. |
+| **Dynamic Home:** Smart *Continue Watching* plus recommendations generated from your watched movies and shows. | **TMDB-Powered Discovery:** Optional TMDB API key unlocks rich, external recommendations and metadata. |
+| **Custom Home Sections:** Build your own Browse experience using favorite filters as homepage sections. | **Playback Preferences:** Configure default audio tracks and preferred streaming quality in settings. |
+| **Flexible Sign-In:** Log in via **Emby Connect** or connect directly to your server. | **Rust-Powered:** Lightweight, secure, blazing-fast desktop builds via Tauri. |
 
 
 ---
