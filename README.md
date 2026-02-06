@@ -34,6 +34,8 @@ Built with a **Direct Play Focus**, it bypasses server-side transcoding to deliv
 
 ---
 
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/H2H011S05A)
+
 ## 🛠️ Tech Stack
 
 <details>
