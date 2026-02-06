@@ -1,14 +1,12 @@
 IMPORTANT NOTE: due to the complexity of android development and my limited experience in this field. I will continue to develop Aether as a Windows application and not for Android TV.
 This decision was not made lightly and I may continue android development in the future
 
-
 <div align="center">
 
 # 🌌 Aether
 ### The Definitive Direct-Play Experience for Emby
 
 [![Platform - Windows](https://img.shields.io/badge/Platform-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/DanielVNZ/modern-emby)
-[![Platform - Android TV](https://img.shields.io/badge/Platform-Android%20TV-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/DanielVNZ/modern-emby)
 [![License - MIT](https://img.shields.io/badge/License-MIT-FFD700?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
 [**Explore the Docs**](#-getting-started) •
@@ -18,7 +16,7 @@ This decision was not made lightly and I may continue android development in the
 ---
 
 **Aether** is a modern, sleek media player client designed for purists.  
-Built with a **Direct Play Focus**, it bypasses server-side transcoding to deliver the highest possible audio and video fidelity on Windows and Android TV.
+Built with a **Direct Play Focus**, it bypasses server-side transcoding to deliver the highest possible audio and video fidelity on Windows.
 
 </div>
 
@@ -28,12 +26,11 @@ Built with a **Direct Play Focus**, it bypasses server-side transcoding to deliv
 
 | 💎 Premium Experience | 🛠️ Technical Prowess |
 | :--- | :--- |
-| **Modern UI/UX:** Silky smooth React transitions designed for both the desktop mouse and the "10-foot" couch experience. (kind of lol) | **Direct Play Focus:** No transcoding, no quality loss. Aether requests original streams for maximum performance. |
-| **TV-First Navigation:** Full D-pad and keyboard support with optimized focus handling for Android TV. | **Stats for Nerds:** Real-time monitoring of bitrates, resolution, and buffering health. |
-| **Dynamic Home:** Smart *Continue Watching* plus recommendations generated from your watched movies and shows. | **TMDB-Powered Discovery:** Optional TMDB API key unlocks rich, external recommendations and metadata. |
-| **Custom Home Sections:** Build your own Browse experience using favorite filters as homepage sections. | **Playback Preferences:** Configure default audio tracks and preferred streaming quality in settings. |
-| **Flexible Sign-In:** Log in via **Emby Connect** or connect directly to your server. | **Rust-Powered:** Lightweight, secure, blazing-fast desktop builds via Tauri. |
-
+| **Modern UI/UX:** Silky smooth React transitions designed for desktop use. | **Direct Play Focus:** No transcoding, no quality loss. Aether requests original streams for maximum performance. |
+| **Dynamic Home:** Smart *Continue Watching* plus recommendations generated from your watched movies and shows. | **Stats for Nerds:** Real-time monitoring of bitrates, resolution, and buffering health. |
+| **Custom Home Sections:** Build your own Browse experience using favorite filters as homepage sections. | **TMDB-Powered Discovery:** Optional TMDB API key unlocks rich, external recommendations and metadata. |
+| **Flexible Sign-In:** Log in via **Emby Connect** or connect directly to your server. | **Playback Preferences:** Configure default audio tracks and preferred streaming quality in settings. |
+| **Native Desktop App:** Seamless Windows experience with system integration. | **Rust-Powered:** Lightweight, secure, blazing-fast desktop builds via Tauri. |
 
 ---
 
@@ -55,9 +52,10 @@ Built with a **Direct Play Focus**, it bypasses server-side transcoding to deliv
 ## 📸 Screenshots
 
 <img src="README_Images/Snip1.png" alt="Aether Screenshot 1" width="800" /> <br /><br />
-<img src="README_Images/Snip2.png" alt="Aether Screenshot 1" width="800" /> <br /><br />
-<img src="README_Images/Snip3.png" alt="Aether Screenshot 1" width="800" /> <br /><br />
-<img src="README_Images/Snip4.png" alt="Aether Screenshot 1" width="800" /> <br /><br />
+<img src="README_Images/Snip2.png" alt="Aether Screenshot 2" width="800" /> <br /><br />
+<img src="README_Images/Snip3.png" alt="Aether Screenshot 3" width="800" /> <br /><br />
+<img src="README_Images/Snip4.png" alt="Aether Screenshot 4" width="800" /> <br /><br />
+
 ---
 
 ## 🏁 Getting Started
