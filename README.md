@@ -1,3 +1,7 @@
+IMPORTANT NOTE: due to the complexity of android development and my limited experience in this field. I will continue to develop Aether as a Windows application and not for Android TV.
+This decision was not made lightly and I may continue android development in the future
+
+
 <div align="center">
 
 # 🌌 Aether
