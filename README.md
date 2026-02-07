@@ -22,15 +22,38 @@ Built with a **Direct Play Focus**, it bypasses server-side transcoding to deliv
 
 ---
 
-## 🚀 Key Features
+## ✨ Features
 
-| 💎 Premium Experience | 🛠️ Technical Prowess |
-| :--- | :--- |
-| **Modern UI/UX:** Silky smooth React transitions designed for desktop use. | **Direct Play Focus:** No transcoding, no quality loss. Aether requests original streams for maximum performance. |
-| **Dynamic Home:** Smart *Continue Watching* plus recommendations generated from your watched movies and shows. | **Stats for Nerds:** Real-time monitoring of bitrates, resolution, and buffering health. |
-| **Custom Home Sections:** Build your own Browse experience using favorite filters as homepage sections. | **TMDB-Powered Discovery:** Optional TMDB API key unlocks rich, external recommendations and metadata. |
-| **Flexible Sign-In:** Log in via **Emby Connect** or connect directly to your server. | **Playback Preferences:** Configure default audio tracks and preferred streaming quality in settings. |
-| **Web Desktop App:** Seamless Windows experience. | **Rust-Powered:** Lightweight, secure, blazing-fast desktop builds via Tauri. |
+- **Smart Media Merging**  
+  Automatically merges non-4K and 4K versions into a single library item.
+
+- **Customisable Home Screen**  
+  Fully personalise your home screen layout to match your viewing habits.
+
+- **Home Screen Sort Controls**  
+  Change and fine-tune the sort order of home screen sections.
+
+- **User-Defined Filters**  
+  Create custom filters and display them directly on the home screen.
+
+- **Season Count Filtering (TV Series)**  
+  Filter series based on the number of seasons.
+
+- **Emby Favourites Support**  
+  Native support for Emby favourites for quick access to your most-loved content.
+
+- **Automatic Black Bar Removal**  
+  Detects and removes hard-coded black bars in movies and TV series for a true full-screen experience.
+
+- **Emby Statistics Dashboard**  
+  View detailed playback and usage statistics directly within the app.
+
+- **TMDB API Integration**  
+  Pulls trending movies and TV shows directly from The Movie Database.
+
+- **Automatic Updates**  
+  Seamless background updates ensure you always have the latest features and fixes.
+
 
 ---
 
