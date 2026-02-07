@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { check, type DownloadEvent } from '@tauri-apps/plugin-updater';
+import { isTauri } from '@tauri-apps/api/core';
 import { relaunch } from '@tauri-apps/plugin-process';
 
 export function UpdateBanner() {
@@ -15,10 +16,34 @@ export function UpdateBanner() {
     checkForUpdates();
   }, []);
 
-  const checkForUpdates = async () => {
+  const safeCheckForUpdates = async () => {
+    if (!isTauri()) {
+      return { update: null as Awaited<ReturnType<typeof check>> | null, error: 'Updates are only available in the desktop app.' };
+    }
     try {
       const update = await check();
+      return { update, error: null as string | null };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      if (errorMessage.includes("reading 'available'")) {
+        return {
+          update: null,
+          error: 'Updater returned no data. Verify updater permissions and endpoint.',
+        };
+      }
+      return { update: null, error: errorMessage };
+    }
+  };
+
+  const checkForUpdates = async () => {
+    try {
+      const { update, error } = await safeCheckForUpdates();
       
+      if (error) {
+        console.error('Error checking for updates:', error);
+        return;
+      }
+
       if (update) {
         console.log(
           `Update available: ${update.version}, current version: ${update.currentVersion}`
@@ -37,8 +62,14 @@ export function UpdateBanner() {
       setIsDownloading(true);
       setError(null);
       
-      const update = await check();
+      const { update, error } = await safeCheckForUpdates();
       
+      if (error) {
+        setError(`Update failed: ${error}`);
+        setIsDownloading(false);
+        return;
+      }
+
       if (!update) {
         setError('No update found.');
         setIsDownloading(false);

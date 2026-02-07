@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { embyApi } from '../services/embyApi';
 import { useAuth } from '../hooks/useAuth';
 import { check, type DownloadEvent } from '@tauri-apps/plugin-updater';
+import { isTauri } from '@tauri-apps/api/core';
 import { relaunch } from '@tauri-apps/plugin-process';
 
 type SettingsSection = 'home' | 'recommendations' | 'playback' | 'account' | 'updates';
@@ -161,15 +162,38 @@ export function Settings() {
   const [hasCheckedForUpdates, setHasCheckedForUpdates] = useState(false);
   const [currentVersion] = useState('3.0.9');
 
+  const safeCheckForUpdates = async () => {
+    if (!isTauri()) {
+      return { update: null as Awaited<ReturnType<typeof check>> | null, error: 'Updates are only available in the desktop app.' };
+    }
+    try {
+      const update = await check();
+      return { update, error: null as string | null };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      if (errorMessage.includes("reading 'available'")) {
+        return {
+          update: null,
+          error: 'Updater returned no data. Verify updater permissions and endpoint.',
+        };
+      }
+      return { update: null, error: errorMessage };
+    }
+  };
+
   const checkForUpdates = async () => {
     try {
       setIsCheckingUpdate(true);
       setUpdateError(null);
       setHasCheckedForUpdates(false);
       
-      const update = await check();
+      const { update, error } = await safeCheckForUpdates();
       
-      if (update) {
+      if (error) {
+        setUpdateAvailable(false);
+        setUpdateVersion('');
+        setUpdateError(`Failed to check for updates: ${error}`);
+      } else if (update) {
         console.log(`Update available: ${update.version}, current: ${update.currentVersion}`);
         setUpdateAvailable(true);
         setUpdateVersion(update.version);
@@ -192,8 +216,14 @@ export function Settings() {
       setIsDownloading(true);
       setUpdateError(null);
       
-      const update = await check();
+      const { update, error } = await safeCheckForUpdates();
       
+      if (error) {
+        setUpdateError(`Update failed: ${error}`);
+        setIsDownloading(false);
+        return;
+      }
+
       if (!update) {
         setUpdateError('No update found. Please check for updates first.');
         setIsDownloading(false);

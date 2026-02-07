@@ -16,8 +16,9 @@
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.1.18",
-    "@tauri-apps/plugin-process": "2.9.0",
+    "@tauri-apps/plugin-process": "2.3.1",
     "@tauri-apps/plugin-updater": "2.9.0",
+    "@tauri-apps/api": "2.9.1",
     "@types/video.js": "^7.3.58",
     "autoprefixer": "^10.4.23",
     "fflate": "^0.8.2",
@@ -32,8 +33,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
-    "@tauri-apps/api": "2.9.5",
-    "@tauri-apps/cli": "2.9.5",
+    "@tauri-apps/cli": "2.9.6",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
