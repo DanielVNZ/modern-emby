@@ -161,7 +161,7 @@ export function Settings() {
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [hasCheckedForUpdates, setHasCheckedForUpdates] = useState(false);
-  const [currentVersion] = useState('3.0.10');
+  const [currentVersion] = useState('3.0.11');
   const [analyticsConsent, setAnalyticsConsent] = useState<ConsentValue | 'unset'>(
     () => getConsent() ?? 'unset'
   );

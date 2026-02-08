@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { embyApi } from '../services/embyApi';
 import type { EmbyItem } from '../types/emby.types';
 // Inline skeletons replace full-screen loading
@@ -18,6 +18,7 @@ const formatReleaseDate = (dateString?: string): string => {
 export function Library() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [items, setItems] = useState<EmbyItem[]>([]);
   const [parentItem, setParentItem] = useState<EmbyItem | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -71,7 +72,7 @@ export function Library() {
       navigate(`/library/${item.Id}`);
     } else {
       // For movies, go to player
-      navigate(`/player/${item.Id}`);
+      navigate(`/player/${item.Id}`, { state: { backgroundLocation: location } });
     }
   };
 

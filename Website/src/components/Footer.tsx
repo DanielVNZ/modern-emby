@@ -1,13 +1,23 @@
 import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
+import { usePlayerUi } from '../context/PlayerUiContext';
 
 export function Footer() {
   const location = useLocation();
   const isPlayerPage = location.pathname.startsWith('/player');
+  const { isCollapsed, activeId } = usePlayerUi();
+  const isMiniPlayerOpen = Boolean(activeId) && isCollapsed;
+  const isPlayerOpen = Boolean(activeId);
 
   useEffect(() => {
-    // Don't load Ko-fi widget on player page
-    if (isPlayerPage) return;
+    // Don't load Ko-fi widget on player page or when player is open
+    if (isPlayerPage || isMiniPlayerOpen || isPlayerOpen) {
+      const kofiWidget = document.querySelector('.floatingchat-container-wrap');
+      if (kofiWidget) {
+        kofiWidget.remove();
+      }
+      return;
+    }
 
     const drawKofi = () => {
       if (window.kofiWidgetOverlay) {
@@ -47,7 +57,7 @@ export function Footer() {
         kofiWidget.remove();
       }
     };
-  }, [isPlayerPage]);
+  }, [isMiniPlayerOpen, isPlayerOpen, isPlayerPage]);
 
   return (
     <footer className="relative z-10 border-t border-white/5 mt-16 py-8 px-8">

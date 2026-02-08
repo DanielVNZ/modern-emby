@@ -1,16 +1,23 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { unzipSync, strFromU8 } from 'fflate';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import Hls from 'hls.js';
 import shaka from 'shaka-player/dist/shaka-player.ui.js';
 import { embyApi } from '../services/embyApi';
 import { MediaSelector } from './MediaSelector';
+import { usePlayerUi } from '../context/PlayerUiContext';
 // Inline skeleton replaces full-screen loading
 import type { MediaSource, EmbyItem } from '../types/emby.types';
 
-export function Player() {
-  const { id } = useParams<{ id: string }>();
+export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: string; isCollapsed?: boolean }) {
+  const params = useParams<{ id: string }>();
+  const resolvedId = playerId ?? params.id;
   const navigate = useNavigate();
+  const location = useLocation();
+  const { setActiveId, isCollapsed, setIsCollapsed, lastNonPlayerPath } = usePlayerUi();
+  const backgroundLocation = (location.state as { backgroundLocation?: unknown } | undefined)
+    ?.backgroundLocation as typeof location | undefined;
+  const isCollapsedView = isCollapsedProp ?? isCollapsed;
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const shakaRef = useRef<shaka.Player | null>(null);
@@ -128,7 +135,7 @@ export function Player() {
   }, []);
 
   useEffect(() => {
-    if (id) {
+    if (resolvedId) {
       // Clean up previous playback session before loading new one
       if (hlsRef.current) {
         console.log('Destroying previous HLS instance');
@@ -170,7 +177,7 @@ export function Player() {
       if (selectedSource && videoRef.current) {
         const positionTicks = Math.floor(videoRef.current.currentTime * 10000000);
         embyApi.reportPlaybackStopped({
-          ItemId: id!,
+          ItemId: resolvedId!,
           MediaSourceId: selectedSource.Id,
           PlaySessionId: playSessionId,
           PositionTicks: positionTicks,
@@ -200,7 +207,7 @@ export function Player() {
         subtitleBlobUrlRef.current = '';
       }
     };
-  }, [id]);
+  }, [resolvedId]);
 
   // Effect to collect stats for nerds
   useEffect(() => {
@@ -469,7 +476,7 @@ export function Player() {
 
   // Effect for automatic black bar detection
   useEffect(() => {
-    if (!autoZoomEnabled || !videoRef.current || !streamUrl) {
+    if (!autoZoomEnabled || !videoRef.current || !streamUrl || isCollapsedView) {
       // Clean up interval if auto mode is disabled
       if (autoZoomIntervalRef.current) {
         clearInterval(autoZoomIntervalRef.current);
@@ -681,7 +688,7 @@ export function Player() {
         autoZoomIntervalRef.current = null;
       }
     };
-  }, [autoZoomEnabled, streamUrl]);
+  }, [autoZoomEnabled, isCollapsedView, streamUrl]);
 
   const handleMouseMove = () => {
     // On Android TV, some devices generate synthetic mousemove events
@@ -1149,7 +1156,7 @@ export function Player() {
       setIsLoading(true);
       setError('');
 
-      const playbackInfo = await embyApi.getPlaybackInfo(id!);
+      const playbackInfo = await embyApi.getPlaybackInfo(resolvedId!);
 
       if (!playbackInfo.MediaSources || playbackInfo.MediaSources.length === 0) {
         setError('No playable media sources found');
@@ -1160,7 +1167,7 @@ export function Player() {
       setPlaySessionId(playbackInfo.PlaySessionId);
 
       // Get full item details including resume position
-      const itemDetails = await embyApi.getItem(id!);
+      const itemDetails = await embyApi.getItem(resolvedId!);
       if (itemDetails) setItem(itemDetails);
       
       // Get resume position in seconds
@@ -1182,7 +1189,7 @@ export function Player() {
           });
           
           const episodes = episodesResponse.Items;
-          const currentIndex = episodes.findIndex(ep => ep.Id === id);
+          const currentIndex = episodes.findIndex(ep => ep.Id === resolvedId);
           
           if (currentIndex > 0) {
             setPrevEpisode(episodes[currentIndex - 1]);
@@ -1262,7 +1269,7 @@ export function Player() {
       if (selectedSource) {
         const positionTicks = Math.floor(video.currentTime * 10000000);
         embyApi.reportPlaybackProgress({
-          ItemId: id!,
+          ItemId: resolvedId!,
           MediaSourceId: selectedSource.Id,
           PlaySessionId: playSessionId,
           PositionTicks: positionTicks,
@@ -1277,7 +1284,7 @@ export function Player() {
       if (selectedSource) {
         const positionTicks = Math.floor(video.currentTime * 10000000);
         embyApi.reportPlaybackProgress({
-          ItemId: id!,
+          ItemId: resolvedId!,
           MediaSourceId: selectedSource.Id,
           PlaySessionId: playSessionId,
           PositionTicks: positionTicks,
@@ -1292,7 +1299,7 @@ export function Player() {
       if (selectedSource) {
         const positionTicks = Math.floor(video.duration * 10000000);
         embyApi.reportPlaybackStopped({
-          ItemId: id!,
+          ItemId: resolvedId!,
           MediaSourceId: selectedSource.Id,
           PlaySessionId: playSessionId,
           PositionTicks: positionTicks,
@@ -1301,7 +1308,7 @@ export function Player() {
       
       // Auto-play next episode if available
       if (nextEpisode) {
-        navigate(`/player/${nextEpisode.Id}`, { replace: true });
+        navigate(`/player/${nextEpisode.Id}`, { replace: true, state: { backgroundLocation: backgroundLocation ?? location } });
       }
     };
     
@@ -1561,14 +1568,14 @@ export function Player() {
     if (defaultAudio) {
       setSelectedAudioIndex(defaultAudio.Index);
       
-      const url = embyApi.getStreamUrl(id!, source.Id, sessionId, source.Container, defaultAudio.Index);
+      const url = embyApi.getStreamUrl(resolvedId!, source.Id, sessionId, source.Container, defaultAudio.Index);
       console.log('Stream URL:', url);
       setStreamUrl(url);
       
       // Report playback started with position
       const positionTicks = Math.floor(startPosition * 10000000);
       embyApi.reportPlaybackStart({
-        ItemId: id!,
+        ItemId: resolvedId!,
         MediaSourceId: source.Id,
         PlaySessionId: sessionId,
         PositionTicks: positionTicks,
@@ -1588,7 +1595,7 @@ export function Player() {
           if (Math.abs(positionTicks - lastReportedTimeRef.current) > 10000000) {
             lastReportedTimeRef.current = positionTicks;
             embyApi.reportPlaybackProgress({
-              ItemId: id!,
+              ItemId: resolvedId!,
               MediaSourceId: source.Id,
               PlaySessionId: sessionId,
               PositionTicks: positionTicks,
@@ -1623,7 +1630,7 @@ export function Player() {
     const positionTicks = Math.floor(currentTime * 10000000);
     try {
       await embyApi.reportPlaybackStopped({
-        ItemId: id!,
+        ItemId: resolvedId!,
         MediaSourceId: selectedSource.Id,
         PlaySessionId: playSessionId,
         PositionTicks: positionTicks,
@@ -1644,16 +1651,16 @@ export function Player() {
     
     // Get a new playback session
     try {
-      const newPlaybackInfo = await embyApi.getPlaybackInfo(id!);
+      const newPlaybackInfo = await embyApi.getPlaybackInfo(resolvedId!);
       const newSessionId = newPlaybackInfo.PlaySessionId;
       setPlaySessionId(newSessionId);
       
-      const url = embyApi.getStreamUrl(id!, selectedSource.Id, newSessionId, selectedSource.Container, audioIndex);
+      const url = embyApi.getStreamUrl(resolvedId!, selectedSource.Id, newSessionId, selectedSource.Container, audioIndex);
       setStreamUrl(url);
       
       // Report playback start with new audio track
       await embyApi.reportPlaybackStart({
-        ItemId: id!,
+        ItemId: resolvedId!,
         MediaSourceId: selectedSource.Id,
         PlaySessionId: newSessionId,
         PositionTicks: positionTicks,
@@ -1831,7 +1838,7 @@ export function Player() {
       const positionTicks = Math.floor(videoRef.current.currentTime * 10000000);
       try {
         await embyApi.reportPlaybackStopped({
-          ItemId: id!,
+          ItemId: resolvedId!,
           MediaSourceId: selectedSource.Id,
           PlaySessionId: playSessionId,
           PositionTicks: positionTicks,
@@ -1840,7 +1847,23 @@ export function Player() {
         console.error('Failed to report playback stopped:', err);
       }
     }
-    navigate(-1);
+    setActiveId(null);
+    setIsCollapsed(false);
+    navigate(lastNonPlayerPath || '/home');
+  };
+
+  const handleCollapse = () => {
+    if (!resolvedId) return;
+    setIsCollapsed(true);
+    if (!backgroundLocation) {
+      navigate(lastNonPlayerPath || '/home');
+    }
+  };
+
+  const handleExpand = () => {
+    if (!resolvedId) return;
+    setIsCollapsed(false);
+    navigate(`/player/${resolvedId}`, { state: { backgroundLocation: backgroundLocation ?? location } });
   };
 
   const handlePreviousEpisode = async () => {
@@ -1857,7 +1880,7 @@ export function Player() {
       const positionTicks = Math.floor(videoRef.current.currentTime * 10000000);
       try {
         await embyApi.reportPlaybackStopped({
-          ItemId: id!,
+          ItemId: resolvedId!,
           MediaSourceId: selectedSource.Id,
           PlaySessionId: playSessionId,
           PositionTicks: positionTicks,
@@ -1877,7 +1900,7 @@ export function Player() {
       shakaRef.current = null;
     }
     
-    navigate(`/player/${prevEpisode.Id}`, { replace: true });
+    navigate(`/player/${prevEpisode.Id}`, { replace: true, state: { backgroundLocation: backgroundLocation ?? location } });
   };
 
   const handleNextEpisode = async () => {
@@ -1894,7 +1917,7 @@ export function Player() {
       const positionTicks = Math.floor(videoRef.current.currentTime * 10000000);
       try {
         await embyApi.reportPlaybackStopped({
-          ItemId: id!,
+          ItemId: resolvedId!,
           MediaSourceId: selectedSource.Id,
           PlaySessionId: playSessionId,
           PositionTicks: positionTicks,
@@ -1914,7 +1937,7 @@ export function Player() {
       shakaRef.current = null;
     }
     
-    navigate(`/player/${nextEpisode.Id}`, { replace: true });
+    navigate(`/player/${nextEpisode.Id}`, { replace: true, state: { backgroundLocation: backgroundLocation ?? location } });
   };
 
   const toggleFullscreen = async () => {
@@ -2242,8 +2265,15 @@ export function Player() {
     );
   }
 
+  const posterUrl =
+    item?.Type === 'Episode' && item.SeriesId
+      ? embyApi.getImageUrl(item.SeriesId, 'Primary', { maxWidth: 1920 })
+      : item?.ImageTags?.Primary
+      ? embyApi.getImageUrl(item.Id, 'Primary', { maxWidth: 1920 })
+      : undefined;
+
   return (
-    <div className="min-h-screen bg-black">
+    <div className="relative">
       {showSelector && (
         <MediaSelector
           mediaSources={mediaSources}
@@ -2255,78 +2285,102 @@ export function Player() {
       {streamUrl && (
         <div
           ref={containerRef}
-          className="relative w-full h-screen bg-black player-ui"
-          onMouseMove={handleMouseMove}
-          onMouseLeave={handleMouseLeave}
+          className={`player-ui fixed inset-0 z-50 bg-black overflow-hidden border-t border-white/10 shadow-2xl motion-safe:transition-transform motion-safe:duration-500 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] [--mini-height:5rem] sm:[--mini-height:6rem]`}
+          style={
+            {
+              transform: isCollapsedView ? 'translateY(calc(100% - var(--mini-height)))' : 'translateY(0)',
+              ...(isCollapsedView && posterUrl
+                ? {
+                    backgroundImage: `linear-gradient(to right, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.7) 45%, rgba(0,0,0,0.92) 100%), url(${posterUrl})`,
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center',
+                  }
+                : {}),
+            }
+          }
+          onMouseMove={isCollapsedView ? undefined : handleMouseMove}
+          onMouseLeave={isCollapsedView ? undefined : handleMouseLeave}
         >
           {/* Header overlay */}
-          <div className={`absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/80 to-transparent p-6 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={handleBack}
-                  className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm transition-all duration-200 hover:scale-105 active:scale-95"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                  </svg>
-                </button>
-                <div>
-                  <h1 className="text-white text-2xl font-bold">{item?.Name}</h1>
-                  {item?.SeriesName && (
-                    <p className="text-gray-300 text-sm mt-1">
-                      {item.SeriesName}
-                      {item.ParentIndexNumber !== undefined && item.IndexNumber !== undefined && (
-                        <span className="ml-2 text-gray-400">
-                          S{item.ParentIndexNumber.toString().padStart(2, '0')}E{item.IndexNumber.toString().padStart(2, '0')}
-                        </span>
-                      )}
-                    </p>
-                  )}
-                </div>
-              </div>
-              
-              {/* Quality indicator */}
-              {selectedSource && (() => {
-                const videoStream = selectedSource.MediaStreams?.find(s => s.Type === 'Video');
-                const height = videoStream?.Height || 0;
-                const width = videoStream?.Width || 0;
-                const codec = videoStream?.Codec?.toUpperCase() || '';
-                const bitrate = selectedSource.Bitrate ? Math.round(selectedSource.Bitrate / 1000000) : null;
-
-                // Consider cropped scope titles: treat 3840-wide as 4K even if height < 2160
-                let qualityLabel = '';
-                if (width >= 3800 || height >= 2160) qualityLabel = '4K';
-                else if (width >= 1920 || height >= 1080) qualityLabel = '1080p';
-                else if (width >= 1280 || height >= 720) qualityLabel = '720p';
-                else if (width >= 854 || height >= 480) qualityLabel = '480p';
-                else if (height > 0) qualityLabel = `${height}p`;
-
-                return (
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-black/50 backdrop-blur-sm rounded-lg">
-                    {qualityLabel && (
-                      <span className={`text-sm font-bold ${(width >= 3800 || height >= 2160) ? 'text-yellow-400' : (width >= 1920 || height >= 1080) ? 'text-blue-400' : 'text-gray-300'}`}>
-                        {qualityLabel}
-                      </span>
-                    )}
-                    {codec && (
-                      <span className="text-xs text-gray-400">{codec}</span>
-                    )}
-                    {bitrate && (
-                      <span className="text-xs text-gray-500">{bitrate} Mbps</span>
+          {!isCollapsedView && (
+            <div className={`absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/80 to-transparent p-6 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3 sm:gap-4">
+                  <button
+                    onClick={handleCollapse}
+                    className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm transition-all duration-200 hover:scale-105 active:scale-95"
+                    title="Collapse player"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={handleBack}
+                    className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm transition-all duration-200 hover:scale-105 active:scale-95"
+                    title="Close player"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                  <div>
+                    <h1 className="text-white text-2xl font-bold">{item?.Name}</h1>
+                    {item?.SeriesName && (
+                      <p className="text-gray-300 text-sm mt-1">
+                        {item.SeriesName}
+                        {item.ParentIndexNumber !== undefined && item.IndexNumber !== undefined && (
+                          <span className="ml-2 text-gray-400">
+                            S{item.ParentIndexNumber.toString().padStart(2, '0')}E{item.IndexNumber.toString().padStart(2, '0')}
+                          </span>
+                        )}
+                      </p>
                     )}
                   </div>
-                );
-              })()}
+                </div>
+                
+                {/* Quality indicator */}
+                {selectedSource && (() => {
+                  const videoStream = selectedSource.MediaStreams?.find(s => s.Type === 'Video');
+                  const height = videoStream?.Height || 0;
+                  const width = videoStream?.Width || 0;
+                  const codec = videoStream?.Codec?.toUpperCase() || '';
+                  const bitrate = selectedSource.Bitrate ? Math.round(selectedSource.Bitrate / 1000000) : null;
+
+                  // Consider cropped scope titles: treat 3840-wide as 4K even if height < 2160
+                  let qualityLabel = '';
+                  if (width >= 3800 || height >= 2160) qualityLabel = '4K';
+                  else if (width >= 1920 || height >= 1080) qualityLabel = '1080p';
+                  else if (width >= 1280 || height >= 720) qualityLabel = '720p';
+                  else if (width >= 854 || height >= 480) qualityLabel = '480p';
+                  else if (height > 0) qualityLabel = `${height}p`;
+
+                  return (
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-black/50 backdrop-blur-sm rounded-lg">
+                      {qualityLabel && (
+                        <span className={`text-sm font-bold ${(width >= 3800 || height >= 2160) ? 'text-yellow-400' : (width >= 1920 || height >= 1080) ? 'text-blue-400' : 'text-gray-300'}`}>
+                          {qualityLabel}
+                        </span>
+                      )}
+                      {codec && (
+                        <span className="text-xs text-gray-400">{codec}</span>
+                      )}
+                      {bitrate && (
+                        <span className="text-xs text-gray-500">{bitrate} Mbps</span>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Video element */}
           <video
             ref={videoRef}
             autoPlay
             onClick={togglePlayPause}
-            className="w-full h-full object-contain cursor-pointer"
+            className={`w-full h-full cursor-pointer ${isCollapsedView ? 'object-cover opacity-0 pointer-events-none' : 'object-contain'}`}
             style={{ 
               filter: currentFilterCss,
               transform: autoZoomEnabled 
@@ -2335,13 +2389,7 @@ export function Player() {
               transformOrigin: 'center center'
             }}
             crossOrigin="anonymous"
-            poster={
-              item?.Type === 'Episode' && item.SeriesId
-                ? embyApi.getImageUrl(item.SeriesId, 'Primary', { maxWidth: 1920 })
-                : item?.ImageTags?.Primary
-                ? embyApi.getImageUrl(item.Id, 'Primary', { maxWidth: 1920 })
-                : undefined
-            }
+            poster={posterUrl}
           >
             {/* Subtitle tracks */}
             {customSubtitleUrl && (
@@ -2364,8 +2412,86 @@ export function Player() {
             )}
           </video>
 
+          {isCollapsedView && (
+            <div className="absolute top-0 left-0 right-0 z-40 h-[var(--mini-height)] flex items-center justify-between px-3 sm:px-4 bg-gradient-to-r from-black/85 via-black/50 to-black/85 backdrop-blur-sm">
+              <button
+                onClick={handleExpand}
+                className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm transition-all duration-200 hover:scale-105 active:scale-95"
+                title="Expand player"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                </svg>
+              </button>
+
+              <div className="flex items-center gap-3 flex-1 min-w-0 mx-3">
+                {posterUrl && (
+                  <img
+                    src={posterUrl}
+                    alt={item?.Name || 'Now playing'}
+                    className="h-12 w-12 sm:h-14 sm:w-14 rounded-md object-cover shadow-lg border border-white/10"
+                    loading="lazy"
+                  />
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-white text-sm font-semibold truncate">{item?.Name || 'Now Playing'}</p>
+                  {item?.SeriesName && (
+                    <p className="text-gray-300 text-xs truncate">
+                      {item.SeriesName}
+                      {item.ParentIndexNumber !== undefined && item.IndexNumber !== undefined && (
+                        <span className="ml-2 text-gray-400">
+                          S{item.ParentIndexNumber.toString().padStart(2, '0')}E{item.IndexNumber.toString().padStart(2, '0')}
+                        </span>
+                      )}
+                    </p>
+                  )}
+                  {duration > 0 && (
+                    <p className="text-gray-300 text-[11px] sm:text-xs tabular-nums truncate">
+                      {formatTime(currentTime)} / {formatTime(duration)}
+                      <span className="text-gray-400"> • -{formatTime(Math.max(duration - currentTime, 0))}</span>
+                      <span className="text-gray-500"> • Ends {getEndTime()}</span>
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    togglePlayPause();
+                  }}
+                  className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm transition-all duration-200 hover:scale-105 active:scale-95"
+                  title={isPlaying ? 'Pause' : 'Play'}
+                >
+                {isPlaying ? (
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+                  </svg>
+                  ) : (
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                  )}
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleBack();
+                  }}
+                  className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm transition-all duration-200 hover:scale-105 active:scale-95"
+                  title="Close player"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Stats for nerds panel */}
-          {showStats && (
+          {!isCollapsedView && showStats && (
             <div className="absolute top-20 left-6 z-30 bg-black/90 backdrop-blur-md rounded-xl p-4 shadow-2xl border border-white/10 font-mono text-xs max-w-md">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-white font-semibold text-sm">Stats for Nerds</h3>
@@ -2381,7 +2507,7 @@ export function Player() {
               <div className="space-y-2 text-gray-300">
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1">
                   <span className="text-gray-500">Video ID:</span>
-                  <span className="text-white truncate">{id}</span>
+                  <span className="text-white truncate">{resolvedId}</span>
                   
                   <span className="text-gray-500">Resolution:</span>
                   <span className="text-white">{stats.videoResolution}</span>
@@ -2432,7 +2558,7 @@ export function Player() {
           )}
 
           {/* Loading spinner overlay */}
-          {isVideoLoading && (
+          {!isCollapsedView && isVideoLoading && (
             <div className="absolute inset-0 flex items-center justify-center z-30 pointer-events-none">
               <div className="flex flex-col items-center gap-4">
                 {/* Spinning loader */}
@@ -2444,7 +2570,7 @@ export function Player() {
           )}
 
           {/* Up Next popup - appears 2 minutes before end */}
-          {showUpNext && nextEpisode && (
+          {!isCollapsedView && showUpNext && nextEpisode && (
             <div className="absolute bottom-32 right-6 z-30 animate-fade-in">
               <div className="bg-black/90 backdrop-blur-md rounded-xl p-4 shadow-2xl border border-gray-700 max-w-sm">
                 <div className="flex items-center justify-between mb-2">
@@ -2483,7 +2609,7 @@ export function Player() {
           )}
 
           {/* Episode navigation buttons */}
-          {item?.Type === 'Episode' && (prevEpisode || nextEpisode) && (
+          {!isCollapsedView && item?.Type === 'Episode' && (prevEpisode || nextEpisode) && (
             <div className={`absolute bottom-36 sm:bottom-24 left-1/2 -translate-x-1/2 z-20 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
               <div className="flex items-center gap-1 sm:gap-2 bg-black/60 backdrop-blur-md rounded-full px-2 sm:px-3 py-1.5 sm:py-2 border border-white/10" role="list" aria-label="Episode navigation">
                 {/* Previous Episode */}
@@ -2531,7 +2657,8 @@ export function Player() {
           )}
 
           {/* Custom Control Bar */}
-          <div className={`player-controls absolute bottom-0 left-0 right-0 z-40 bg-gradient-to-t from-black/90 to-transparent transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+          {!isCollapsedView && (
+            <div className={`player-controls absolute bottom-0 left-0 right-0 z-40 bg-gradient-to-t from-black/90 to-transparent transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
             {/* Seek bar */}
             <div className="px-4 pt-2">
               <div 
@@ -2706,9 +2833,11 @@ export function Player() {
               <div className="flex items-center gap-2">
               </div>
             </div>
-          </div>
+            </div>
+          )}
 
           {/* Audio, Subtitle, Version selectors and other controls */}
+          {!isCollapsedView && (
           <div className={`absolute bottom-24 right-6 z-20 transition-opacity duration-300 flex items-center gap-2 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} role="list" aria-label="Player options">
             {/* Version selector button */}
             {mediaSources.length > 1 && selectedSource && (
@@ -3056,6 +3185,7 @@ export function Player() {
               </div>
             )}
           </div>
+          )}
         </div>
       )}
     </div>

@@ -1,11 +1,13 @@
 import { type ReactNode, lazy, Suspense, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { authService } from './services/auth';
 import { embyApi } from './services/embyApi';
 import { AppFallbackSkeleton } from './components/AppFallbackSkeleton';
 import { UpdateBanner } from './components/UpdateBanner';
 import { ConsentBanner } from './components/ConsentBanner';
 import { initAnalytics, trackAppOpen } from './services/analytics';
+import { PlayerUiProvider } from './context/PlayerUiContext';
+import { PlayerHost } from './components/PlayerHost';
 
 // Lazy load all route components for better initial load
 const Login = lazy(() => import('./components/Login').then(m => ({ default: m.Login })));
@@ -16,7 +18,6 @@ const MyList = lazy(() => import('./components/MyList').then(m => ({ default: m.
 const Browse = lazy(() => import('./components/Browse').then(m => ({ default: m.Browse })));
 const PopularBrowse = lazy(() => import('./components/PopularBrowse').then(m => ({ default: m.PopularBrowse })));
 const MediaDetails = lazy(() => import('./components/MediaDetails').then(m => ({ default: m.MediaDetails })));
-const Player = lazy(() => import('./components/Player').then(m => ({ default: m.Player })));
 const Stats = lazy(() => import('./components/Stats').then(m => ({ default: m.Stats })));
 const Settings = lazy(() => import('./components/Settings').then(m => ({ default: m.Settings })));
 
@@ -25,22 +26,16 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   return isAuthenticated ? children : <Navigate to="/login" replace />;
 }
 
-function App() {
-  // Initialize API credentials from localStorage on app startup
-  useEffect(() => {
-    const storedAuth = authService.getAuth();
-    if (storedAuth) {
-      embyApi.setCredentials(storedAuth);
-    }
-    void initAnalytics().then(() => trackAppOpen());
-  }, []);
+function AppRoutes() {
+  const location = useLocation();
+  const backgroundLocation = (location.state as { backgroundLocation?: unknown } | undefined)?.backgroundLocation as typeof location | undefined;
 
   return (
-    <BrowserRouter>
+    <>
       <UpdateBanner />
       <ConsentBanner />
       <Suspense fallback={<AppFallbackSkeleton />}>
-        <Routes>
+        <Routes location={backgroundLocation ?? location}>
           <Route path="/login" element={<Login />} />
           <Route path="/connect" element={<ConnectServers />} />
           <Route
@@ -87,7 +82,7 @@ function App() {
             path="/player/:id"
             element={
               <ProtectedRoute>
-                <Player />
+                <div />
               </ProtectedRoute>
             }
           />
@@ -118,6 +113,26 @@ function App() {
           <Route path="/" element={<Navigate to="/home" replace />} />
         </Routes>
       </Suspense>
+      <PlayerHost />
+    </>
+  );
+}
+
+function App() {
+  // Initialize API credentials from localStorage on app startup
+  useEffect(() => {
+    const storedAuth = authService.getAuth();
+    if (storedAuth) {
+      embyApi.setCredentials(storedAuth);
+    }
+    void initAnalytics().then(() => trackAppOpen());
+  }, []);
+
+  return (
+    <BrowserRouter>
+      <PlayerUiProvider>
+        <AppRoutes />
+      </PlayerUiProvider>
     </BrowserRouter>
   );
 }

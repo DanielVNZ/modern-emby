@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, memo, useCallback, useMemo, type ReactElement } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { embyApi } from '../services/embyApi';
 import { tmdbApi } from '../services/tmdbApi';
 import { deduplicateItems } from '../services/deduplication';
@@ -467,6 +467,7 @@ const MediaRow = memo(({ title, items, icon, browseLink, subtitle, onItemClick, 
 
 export function Home() {
   const navigate = useNavigate();
+  const location = useLocation();
   const defaultHomeSectionOrder = [
     'continue_movies',
     'continue_tv',
@@ -1647,7 +1648,7 @@ export function Home() {
               {/* Action Buttons */}
               <div className="flex items-center gap-4">
                 <button
-                  onClick={() => navigate(`/player/${featuredItem.Id}`)}
+                  onClick={() => navigate(`/player/${featuredItem.Id}`, { state: { backgroundLocation: location } })}
                   className="px-8 py-3.5 bg-white text-black text-lg font-bold rounded hover:bg-gray-200 transition-all duration-200 flex items-center gap-3 shadow-lg"
                 >
                   <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">

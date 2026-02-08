@@ -392,23 +392,23 @@ export function MediaDetails() {
     if (playItem.Type === 'Series') {
       const firstEpisode = allEpisodes.find(ep => !ep.UserData?.Played) || allEpisodes[0] || episodes[0];
       if (firstEpisode) {
-        navigate(`/player/${firstEpisode.Id}`);
+        navigate(`/player/${firstEpisode.Id}`, { state: { backgroundLocation: location } });
       }
       return;
     }
 
     // For movies/episodes, play directly
-    navigate(`/player/${playItem.Id}`);
+    navigate(`/player/${playItem.Id}`, { state: { backgroundLocation: location } });
   };
 
   const handleContinueWatching = () => {
     if (continueWatchingEpisode) {
-      navigate(`/player/${continueWatchingEpisode.Id}`);
+      navigate(`/player/${continueWatchingEpisode.Id}`, { state: { backgroundLocation: location } });
     }
   };
 
   const handleEpisodeClick = (episode: EmbyItem) => {
-    navigate(`/player/${episode.Id}`);
+    navigate(`/player/${episode.Id}`, { state: { backgroundLocation: location } });
   };
 
   const handleToggleWatched = async (episode: EmbyItem, currentlyWatched: boolean) => {
