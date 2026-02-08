@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { embyApi } from '../services/embyApi';
 import { useAuth } from '../hooks/useAuth';
@@ -6,37 +6,48 @@ import { check, type DownloadEvent } from '@tauri-apps/plugin-updater';
 import { isTauri } from '@tauri-apps/api/core';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { getConsent, setConsent, type ConsentValue } from '../services/analytics';
+import { Header } from './Header';
+import { Footer } from './Footer';
 
-type SettingsSection = 'home' | 'recommendations' | 'playback' | 'account' | 'updates';
+type SettingsSection = 'home' | 'playback' | 'account' | 'updates';
+
+const HOME_SECTIONS_KEY = 'home_customSections';
+const DEFAULT_HOME_SECTIONS = [
+  { id: 'continue_movies', label: 'Continue Watching Movies' },
+  { id: 'continue_tv', label: 'Continue Watching TV' },
+  { id: 'favorites', label: 'Favorites' },
+  { id: 'recommended_movies', label: 'Recommended Movies' },
+  { id: 'recommended_series', label: 'Recommended Series' },
+  { id: 'trending_movies', label: 'Trending Movies' },
+  { id: 'popular_tv', label: 'Popular TV Shows' },
+  { id: 'latest_movies', label: 'Latest Movies' },
+  { id: 'latest_episodes', label: 'Latest Episodes' },
+];
+
+const SETTINGS_SECTIONS = [
+  { id: 'home' as const, label: 'Home Screen', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
+  { id: 'playback' as const, label: 'Playback', icon: 'M8 5v14l11-7z' },
+  { id: 'updates' as const, label: 'Updates & Analytics', icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
+  { id: 'account' as const, label: 'Account & Backup', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
+];
+
+const normalizeHomeOrder = (order: string[], sections: { id: string }[]) => {
+  const known = new Set(sections.map(section => section.id));
+  const normalized = order.filter(id => known.has(id));
+  const missing = sections.map(section => section.id).filter(id => !normalized.includes(id));
+  return [...normalized, ...missing];
+};
 
 export function Settings() {
   const navigate = useNavigate();
   const { logout } = useAuth();
+  const restoreInputRef = useRef<HTMLInputElement>(null);
   const [activeSection, setActiveSection] = useState<SettingsSection>('home');
-  const HOME_SECTIONS_KEY = 'home_customSections';
-  const defaultHomeSections = [
-    { id: 'continue_movies', label: 'Continue Watching Movies' },
-    { id: 'continue_tv', label: 'Continue Watching TV' },
-    { id: 'favorites', label: 'Favorites' },
-    { id: 'recommended_movies', label: 'Recommended Movies' },
-    { id: 'recommended_series', label: 'Recommended Series' },
-    { id: 'trending_movies', label: 'Trending Movies' },
-    { id: 'popular_tv', label: 'Popular TV Shows' },
-    { id: 'latest_movies', label: 'Latest Movies' },
-    { id: 'latest_episodes', label: 'Latest Episodes' },
-  ];
   const [customHomeSections, setCustomHomeSections] = useState<{ id: string; label: string; }[]>([]);
   const allHomeSections = useMemo(
-    () => [...defaultHomeSections, ...customHomeSections],
+    () => [...DEFAULT_HOME_SECTIONS, ...customHomeSections],
     [customHomeSections]
   );
-
-  const normalizeHomeOrder = (order: string[], sections: { id: string }[]) => {
-    const known = new Set(sections.map(section => section.id));
-    const normalized = order.filter(id => known.has(id));
-    const missing = sections.map(section => section.id).filter(id => !normalized.includes(id));
-    return [...normalized, ...missing];
-  };
 
   // Settings state
   const [showFeatured, setShowFeatured] = useState(() => {
@@ -83,14 +94,14 @@ export function Settings() {
         if (Array.isArray(parsed)) {
           return normalizeHomeOrder(
             parsed.filter((id: unknown) => typeof id === 'string') as string[],
-            defaultHomeSections
+            DEFAULT_HOME_SECTIONS
           );
         }
       } catch (error) {
         console.error('Failed to parse home section order:', error);
       }
     }
-    return defaultHomeSections.map(section => section.id);
+    return DEFAULT_HOME_SECTIONS.map(section => section.id);
   });
 
   // Load custom home sections (from Browse filter shortcuts)
@@ -151,6 +162,67 @@ export function Settings() {
 
   const handleSave = () => {
     navigate('/home');
+  };
+
+  const downloadSettingsBackup = () => {
+    try {
+      const excludedKeys = new Set(['emby_auth', 'emby_server_url', 'emby_username']);
+      const snapshot: Record<string, string | null> = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key) continue;
+        if (excludedKeys.has(key)) continue;
+        snapshot[key] = localStorage.getItem(key);
+      }
+
+      const payload = {
+        version: 1,
+        createdAt: new Date().toISOString(),
+        app: 'Aether',
+        data: snapshot,
+      };
+
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `aether-settings-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to download settings backup:', error);
+      alert('Failed to download backup.');
+    }
+  };
+
+  const handleRestoreFile = async (file: File) => {
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as { version?: number; data?: Record<string, string | null> };
+      if (!parsed || typeof parsed !== 'object' || !parsed.data || typeof parsed.data !== 'object') {
+        alert('Invalid backup file.');
+        return;
+      }
+
+      const excludedKeys = new Set(['emby_auth', 'emby_server_url', 'emby_username']);
+      Object.entries(parsed.data).forEach(([key, value]) => {
+        if (excludedKeys.has(key)) return;
+        if (value === null || value === undefined) {
+          localStorage.removeItem(key);
+        } else {
+          localStorage.setItem(key, value);
+        }
+      });
+
+      alert('Backup restored. Please reload the app to apply all settings.');
+    } catch (error) {
+      console.error('Failed to restore settings backup:', error);
+      alert('Failed to restore backup.');
+    } finally {
+      if (restoreInputRef.current) {
+        restoreInputRef.current.value = '';
+      }
+    }
   };
 
   // Update checker state
@@ -268,31 +340,12 @@ export function Settings() {
     }
   };
 
-  const sections = [
-    { id: 'home' as const, label: 'Home Screen', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
-    { id: 'recommendations' as const, label: 'Recommendations', icon: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z' },
-    { id: 'playback' as const, label: 'Playback', icon: 'M8 5v14l11-7z' },
-    { id: 'updates' as const, label: 'Updates', icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
-    { id: 'account' as const, label: 'Account', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
-  ];
-
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950 flex">
-      {/* Sidebar Navigation */}
-      <aside className="w-72 border-r border-gray-800/50 flex flex-col sticky top-0 h-screen">
-        <div className="p-6 border-b border-gray-800/50">
-          <button
-            onClick={() => navigate('/home')}
-            className="flex items-center gap-3 text-gray-300 hover:text-white transition-colors group"
-          >
-            <div className="w-9 h-9 rounded-lg bg-white/5 group-hover:bg-white/10 flex items-center justify-center transition-colors">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-            </div>
-            <span className="font-medium">Back to Home</span>
-          </button>
-        </div>
+    <div className="min-h-screen h-screen bg-black flex flex-col overflow-hidden">
+      <Header />
+      <div className="flex flex-1 pt-24 overflow-hidden">
+        {/* Sidebar Navigation */}
+        <aside className="w-72 border-r border-gray-800/50 flex flex-col h-full overflow-hidden">
 
         <div className="p-4 border-b border-gray-800/50">
           <h1 className="text-2xl font-bold text-white px-2">Settings</h1>
@@ -301,7 +354,7 @@ export function Settings() {
         </div>
 
         <nav className="flex-1 p-4 space-y-1">
-          {sections.map((section) => (
+          {SETTINGS_SECTIONS.map((section) => (
             <button
               key={section.id}
               onClick={() => setActiveSection(section.id)}
@@ -311,13 +364,29 @@ export function Settings() {
                   : 'text-gray-400 hover:text-white hover:bg-white/5'
               }`}
             >
-              <svg className="w-5 h-5 flex-shrink-0" fill={section.id === 'recommendations' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={section.id === 'recommendations' ? 0 : 2} viewBox="0 0 24 24">
+              <svg className="w-5 h-5 flex-shrink-0" fill={section.id === 'playback' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={section.id === 'playback' ? 0 : 2} viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d={section.icon} />
               </svg>
               <span className="font-medium">{section.label}</span>
             </button>
           ))}
         </nav>
+
+        <div className="px-4 pb-4">
+          <a
+            href="https://ko-fi.com/danielvnz"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full inline-flex items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-sky-500 to-blue-600 px-4 py-3 text-white font-semibold shadow-lg shadow-sky-500/30 transition-all duration-200 hover:scale-105"
+          >
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/20">
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12 21s-6.716-4.245-9.236-7.236C1.212 12.212 1 10.975 1 10a6 6 0 0112 0h-2a4 4 0 00-8 0c0 .511.116 1.171 1.264 2.468C5.823 14.356 8.82 16.36 12 18.36c3.18-2 6.177-4.004 7.736-5.892C20.884 11.171 21 10.511 21 10a4 4 0 00-8 0h-2a6 6 0 0112 0c0 .975-.212 2.212-1.764 3.764C18.716 16.755 12 21 12 21z" />
+              </svg>
+            </span>
+            Support Me on Ko-fi
+          </a>
+        </div>
 
         <div className="p-4 border-t border-gray-800/50">
           <button
@@ -327,14 +396,14 @@ export function Settings() {
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
-            Save Changes
+            Save & Return Home
           </button>
         </div>
       </aside>
 
-      {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto">
-        <div className="max-w-4xl mx-auto p-8">
+        {/* Main Content Area */}
+        <main className="flex-1 overflow-y-auto h-full">
+        <div key={activeSection} className="max-w-6xl mx-auto p-6 settings-panel-enter">
           
           {/* Home Screen Section */}
           {activeSection === 'home' && (
@@ -344,8 +413,9 @@ export function Settings() {
                 <p className="text-gray-400 mt-2">Configure your home page layout and content</p>
               </div>
 
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
               {/* Featured Section Toggle */}
-              <div className="bg-gray-900/50 rounded-xl border border-gray-800/70 overflow-hidden backdrop-blur-sm">
+              <div className="bg-gray-900/50 rounded-xl border border-gray-800/70 overflow-hidden backdrop-blur-sm xl:col-span-2">
                 <div className="p-6 flex items-center justify-between">
                   <div className="flex-1">
                     <p className="text-white font-semibold text-lg">Featured Billboard</p>
@@ -488,20 +558,10 @@ export function Settings() {
                   </div>
                 </div>
               </div>
-            </div>
-          )}
 
-          {/* Recommendations Section */}
-          {activeSection === 'recommendations' && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-3xl font-bold text-white">Recommendations</h2>
-                <p className="text-gray-400 mt-2">Configure external content sources for trending media</p>
-              </div>
-
-              <div className="bg-gray-900/50 rounded-xl border border-gray-800/70 overflow-hidden backdrop-blur-sm">
+              <div className="bg-gray-900/50 rounded-xl border border-gray-800/70 overflow-hidden backdrop-blur-sm xl:col-span-2">
                 <div className="p-6">
-                  <label className="block text-white font-semibold text-lg mb-2">TMDB API Key</label>
+                  <label className="block text-white font-semibold text-lg mb-2">Recommendations (TMDB)</label>
                   <p className="text-sm text-gray-400 mb-5">
                     Enable popular movie & TV show recommendations on your home screen. 
                     Get your free API key from{' '}
@@ -566,6 +626,7 @@ export function Settings() {
                   </div>
                 </div>
               </div>
+              </div>
             </div>
           )}
 
@@ -577,6 +638,7 @@ export function Settings() {
                 <p className="text-gray-400 mt-2">Customize video and audio playback settings</p>
               </div>
 
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
               <div className="bg-gray-900/50 rounded-xl border border-gray-800/70 overflow-hidden backdrop-blur-sm">
                 <div className="p-6">
                   <label className="block text-white font-semibold text-lg mb-2">Video Quality</label>
@@ -607,13 +669,13 @@ export function Settings() {
                     ))}
                   </div>
                 </div>
+              </div>
 
-                <div className="border-t border-gray-800/70" />
-
+              <div className="bg-gray-900/50 rounded-xl border border-gray-800/70 overflow-hidden backdrop-blur-sm">
                 <div className="p-6">
                   <label className="block text-white font-semibold text-lg mb-2">Video Player</label>
                   <p className="text-sm text-gray-400 mb-5">Choose which player engine to use for video playback</p>
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     {[
                       {
                         value: 'hlsjs',
@@ -655,9 +717,9 @@ export function Settings() {
                     ))}
                   </div>
                 </div>
+              </div>
 
-                <div className="border-t border-gray-800/70" />
-
+              <div className="bg-gray-900/50 rounded-xl border border-gray-800/70 overflow-hidden backdrop-blur-sm">
                 <div className="p-6">
                   <label className="block text-white font-semibold text-lg mb-2">Default Audio Language</label>
                   <p className="text-sm text-gray-400 mb-5">Automatically select this language when available</p>
@@ -692,9 +754,9 @@ export function Settings() {
                     <option value="vie">Vietnamese</option>
                   </select>
                 </div>
+              </div>
 
-                <div className="border-t border-gray-800/70" />
-
+              <div className="bg-gray-900/50 rounded-xl border border-gray-800/70 overflow-hidden backdrop-blur-sm xl:col-span-2">
                 <div className="p-6">
                   <label className="block text-white font-semibold text-lg mb-2">SubDL API Key</label>
                   <p className="text-sm text-gray-400 mb-5">
@@ -781,6 +843,7 @@ export function Settings() {
                     </p>
                   </div>
                 </div>
+              </div>
               </div>
             </div>
           )}
@@ -915,6 +978,51 @@ export function Settings() {
 
               <div className="bg-gray-900/50 rounded-xl border border-gray-800/70 overflow-hidden backdrop-blur-sm">
                 <div className="p-6">
+                  <p className="text-white font-semibold text-lg mb-2">Backup & Restore</p>
+                  <p className="text-sm text-gray-400 mb-5">
+                    Download a backup of all local settings (including home layout, TMDB, SubDL keys) and restore later.
+                    <br></br>
+                    <br></br>
+                    This allows you to apply your settings to other devices, change browsers without losing your configuration, or simply keep a backup in case you need to reset your settings in the future.
+                  </p>
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      onClick={downloadSettingsBackup}
+                      className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-all duration-200 hover:scale-105 flex items-center gap-2"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                      Download Backup
+                    </button>
+
+                    <button
+                      onClick={() => restoreInputRef.current?.click()}
+                      className="px-6 py-3 bg-gray-800/70 hover:bg-gray-700 text-white font-semibold rounded-xl transition-all duration-200 hover:scale-105 flex items-center gap-2"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8M12 16V4m0 0L8 8m4-4l4 4" />
+                      </svg>
+                      Restore Backup
+                    </button>
+                    <input
+                      ref={restoreInputRef}
+                      type="file"
+                      accept="application/json"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          void handleRestoreFile(file);
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-900/50 rounded-xl border border-gray-800/70 overflow-hidden backdrop-blur-sm">
+                <div className="p-6">
                   <p className="text-white font-semibold text-lg mb-2">Session Management</p>
                   <p className="text-sm text-gray-400 mb-5">Sign out of your current session</p>
                   <button
@@ -933,6 +1041,10 @@ export function Settings() {
 
         </div>
       </main>
+      </div>
+      <div className="shrink-0">
+        <Footer />
+      </div>
     </div>
   );
 }

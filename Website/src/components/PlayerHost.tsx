@@ -15,6 +15,8 @@ export function PlayerHost() {
     setIsCollapsed,
     lastNonPlayerPath,
     setLastNonPlayerPath,
+    suppressAutoOpen,
+    setSuppressAutoOpen,
   } = usePlayerUi();
 
   useEffect(() => {
@@ -27,6 +29,9 @@ export function PlayerHost() {
 
     const matchedId = match?.params?.id;
     if (matchedId) {
+      if (suppressAutoOpen) {
+        return;
+      }
       if (activeId !== matchedId) {
         setActiveId(matchedId);
         setIsCollapsed(false);
@@ -38,6 +43,9 @@ export function PlayerHost() {
     if (path !== lastNonPlayerPath) {
       setLastNonPlayerPath(path);
     }
+    if (suppressAutoOpen) {
+      setSuppressAutoOpen(false);
+    }
     if (activeId && !isCollapsed) {
       setIsCollapsed(true);
     }
@@ -48,9 +56,11 @@ export function PlayerHost() {
     location.pathname,
     location.search,
     match?.params?.id,
+    suppressAutoOpen,
     setActiveId,
     setIsCollapsed,
     setLastNonPlayerPath,
+    setSuppressAutoOpen,
   ]);
 
   if (!authService.isAuthenticated() || !activeId) {

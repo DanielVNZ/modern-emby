@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback, memo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { embyApi } from '../services/embyApi';
 import type { EmbyItem } from '../types/emby.types';
@@ -17,14 +17,15 @@ const formatReleaseDate = (dateString?: string): string => {
 };
 
 // Episode Card with image loading animation
-function EpisodeCard({ 
+const EpisodeCard = memo(function EpisodeCard({ 
   episode, 
   thumbUrl, 
   progress, 
   isWatched, 
   onEpisodeClick,
   onToggleWatched,
-  formatRuntime
+  formatRuntime,
+  index
 }: { 
   episode: EmbyItem; 
   thumbUrl: string;
@@ -33,6 +34,7 @@ function EpisodeCard({
   onEpisodeClick: (episode: EmbyItem) => void;
   onToggleWatched: (episode: EmbyItem, currentlyWatched: boolean) => void;
   formatRuntime: (ticks: number) => string;
+  index: number;
 }) {
   const [isImageLoaded, setIsImageLoaded] = useState(false);
   const [isToggling, setIsToggling] = useState(false);
@@ -54,7 +56,8 @@ function EpisodeCard({
     <div
       onClick={() => onEpisodeClick(episode)}
       role="button"
-      className="group bg-gradient-to-br from-gray-900/40 to-gray-800/40 hover:from-gray-800/60 hover:to-gray-700/60 rounded-2xl overflow-hidden cursor-pointer transition-all duration-500 hover:scale-110 hover:shadow-2xl hover:shadow-black/60 text-left border-2 border-white/10 hover:border-white/20"
+      className="group bg-gradient-to-br from-gray-900/40 to-gray-800/40 hover:from-gray-800/60 hover:to-gray-700/60 rounded-2xl overflow-hidden cursor-pointer transition-all duration-500 hover:scale-110 hover:shadow-2xl hover:shadow-black/60 text-left border-2 border-white/10 hover:border-white/20 soft-appear"
+      style={{ animationDelay: `${Math.min(index * 70, 840)}ms` }}
     >
       {/* Thumbnail */}
       <div className="relative aspect-video bg-gradient-to-br from-gray-900 to-gray-800">
@@ -163,7 +166,7 @@ function EpisodeCard({
       </div>
     </div>
   );
-}
+});
 
 export function MediaDetails() {
   const { id } = useParams<{ id: string }>();
@@ -384,7 +387,7 @@ export function MediaDetails() {
     }
   };
 
-  const handlePlay = async (itemToPlay?: EmbyItem) => {
+  const handlePlay = useCallback(async (itemToPlay?: EmbyItem) => {
     const playItem = itemToPlay || item;
     if (!playItem) return;
 
@@ -399,19 +402,19 @@ export function MediaDetails() {
 
     // For movies/episodes, play directly
     navigate(`/player/${playItem.Id}`, { state: { backgroundLocation: location } });
-  };
+  }, [allEpisodes, episodes, item, location, navigate]);
 
-  const handleContinueWatching = () => {
+  const handleContinueWatching = useCallback(() => {
     if (continueWatchingEpisode) {
       navigate(`/player/${continueWatchingEpisode.Id}`, { state: { backgroundLocation: location } });
     }
-  };
+  }, [continueWatchingEpisode, location, navigate]);
 
-  const handleEpisodeClick = (episode: EmbyItem) => {
+  const handleEpisodeClick = useCallback((episode: EmbyItem) => {
     navigate(`/player/${episode.Id}`, { state: { backgroundLocation: location } });
-  };
+  }, [location, navigate]);
 
-  const handleToggleWatched = async (episode: EmbyItem, currentlyWatched: boolean) => {
+  const handleToggleWatched = useCallback(async (episode: EmbyItem, currentlyWatched: boolean) => {
     try {
       if (currentlyWatched) {
         await embyApi.markUnplayed(episode.Id);
@@ -431,7 +434,7 @@ export function MediaDetails() {
     } catch (error) {
       console.error('Failed to toggle watched status:', error);
     }
-  };
+  }, []);
 
   const handleMarkSeasonWatched = async () => {
     if (isMarkingSeasonWatched || episodes.length === 0) return;
@@ -497,13 +500,13 @@ export function MediaDetails() {
     }
   };
 
-  const formatRuntime = (ticks?: number) => {
+  const formatRuntime = useCallback((ticks?: number) => {
     if (!ticks) return '';
     const minutes = Math.floor(ticks / 600000000);
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
-  };
+  }, []);
 
   // Inline skeletons instead of blocking full-screen loading
 
@@ -521,7 +524,7 @@ export function MediaDetails() {
 
   return (
     <div
-      className={`min-h-screen bg-black media-details ${
+      className={`min-h-screen bg-black media-details media-details-enter ${
         item?.Type === 'Movie' ? 'media-details-movie' : ''
       }`}
     >
@@ -554,7 +557,7 @@ export function MediaDetails() {
       {/* Hero Section */}
       <div className="relative z-10 pt-32">
         {/* Content */}
-        <div className="relative max-w-7xl mx-auto px-12 pb-12 flex gap-16">
+        <div className="relative max-w-7xl mx-auto px-12 pb-12 flex gap-16 soft-appear">
           {/* Poster */}
           <div className="hidden md:block flex-shrink-0 w-96">
             <div className="aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl shadow-black/60 ring-2 ring-white/10 hover:ring-white/20 hover:shadow-black/80 transition-all duration-500 hover:scale-105">
@@ -790,7 +793,7 @@ export function MediaDetails() {
 
       {/* Seasons & Episodes */}
       {(item?.Type === 'Series') || (isLoading && !item && mediaHint === 'Series') ? (
-        <div className="max-w-7xl mx-auto px-12 relative z-20 pb-12">
+        <div className="max-w-7xl mx-auto px-12 relative z-20 pb-12 soft-appear">
           {/* Season Selector - Dropdown style for many seasons, tabs for few */}
           <div className="bg-gradient-to-br from-gray-900/60 to-gray-900/40 rounded-3xl p-8 backdrop-blur-sm border-2 border-white/10 shadow-2xl">
           <div className="flex flex-col gap-4 mb-8">
@@ -941,7 +944,7 @@ export function MediaDetails() {
                   </div>
                 </div>
               ))
-            ) : episodes.map((episode) => {
+            ) : episodes.map((episode, index) => {
               const thumbUrl = episode.ImageTags?.Primary
                 ? embyApi.getImageUrl(episode.Id, 'Primary', { maxWidth: 400, tag: episode.ImageTags.Primary })
                 : '';
@@ -960,6 +963,7 @@ export function MediaDetails() {
                   onEpisodeClick={handleEpisodeClick}
                   onToggleWatched={handleToggleWatched}
                   formatRuntime={formatRuntime}
+                  index={index}
                 />
               );
             })}
@@ -970,7 +974,7 @@ export function MediaDetails() {
 
       {/* More Like This Section */}
       {isLoading && !item ? (
-        <div className="relative z-10 px-12 py-12">
+        <div className="relative z-10 px-12 py-12 soft-appear">
           <div className="h-8 w-48 bg-white/10 rounded-xl mb-6 animate-pulse" />
           <div className="flex gap-6 overflow-hidden pb-6">
             {Array.from({ length: 8 }).map((_, i) => (

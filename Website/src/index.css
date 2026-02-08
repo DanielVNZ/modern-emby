@@ -74,6 +74,63 @@ html {
   }
 }
 
+@keyframes settingsPanelIn {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.settings-panel-enter {
+  animation: settingsPanelIn 220ms ease-out;
+}
+
+@keyframes mediaDetailsIn {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.media-details-enter {
+  animation: mediaDetailsIn 260ms ease-out;
+}
+
+@keyframes softAppear {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.soft-appear {
+  animation: softAppear 240ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-panel-enter {
+    animation: none;
+  }
+  .media-details-enter {
+    animation: none;
+  }
+  .soft-appear {
+    animation: none;
+  }
+}
+
 /* Custom utility classes */
 .scrollbar-hide::-webkit-scrollbar {
   display: none;

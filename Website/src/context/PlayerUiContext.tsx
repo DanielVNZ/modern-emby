@@ -7,6 +7,8 @@ type PlayerUiContextValue = {
   setIsCollapsed: (value: boolean) => void;
   lastNonPlayerPath: string;
   setLastNonPlayerPath: (path: string) => void;
+  suppressAutoOpen: boolean;
+  setSuppressAutoOpen: (value: boolean) => void;
 };
 
 const PlayerUiContext = createContext<PlayerUiContextValue | null>(null);
@@ -15,6 +17,7 @@ export function PlayerUiProvider({ children }: { children: ReactNode }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [lastNonPlayerPath, setLastNonPlayerPath] = useState('/home');
+  const [suppressAutoOpen, setSuppressAutoOpen] = useState(false);
 
   const value = useMemo(
     () => ({
@@ -24,8 +27,10 @@ export function PlayerUiProvider({ children }: { children: ReactNode }) {
       setIsCollapsed,
       lastNonPlayerPath,
       setLastNonPlayerPath,
+      suppressAutoOpen,
+      setSuppressAutoOpen,
     }),
-    [activeId, isCollapsed, lastNonPlayerPath],
+    [activeId, isCollapsed, lastNonPlayerPath, suppressAutoOpen],
   );
 
   return <PlayerUiContext.Provider value={value}>{children}</PlayerUiContext.Provider>;

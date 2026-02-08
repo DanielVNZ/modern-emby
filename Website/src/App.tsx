@@ -8,6 +8,7 @@ import { ConsentBanner } from './components/ConsentBanner';
 import { initAnalytics, trackAppOpen } from './services/analytics';
 import { PlayerUiProvider } from './context/PlayerUiContext';
 import { PlayerHost } from './components/PlayerHost';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 
 // Lazy load all route components for better initial load
 const Login = lazy(() => import('./components/Login').then(m => ({ default: m.Login })));
@@ -128,6 +129,9 @@ function App() {
       embyApi.setCredentials(storedAuth);
     }
     void initAnalytics().then(() => trackAppOpen());
+    if (isTauri()) {
+      void invoke('close_splashscreen').catch(() => {});
+    }
   }, []);
 
   return (

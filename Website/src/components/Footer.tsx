@@ -5,13 +5,14 @@ import { usePlayerUi } from '../context/PlayerUiContext';
 export function Footer() {
   const location = useLocation();
   const isPlayerPage = location.pathname.startsWith('/player');
+  const isSettingsPage = location.pathname === '/settings';
   const { isCollapsed, activeId } = usePlayerUi();
   const isMiniPlayerOpen = Boolean(activeId) && isCollapsed;
   const isPlayerOpen = Boolean(activeId);
 
   useEffect(() => {
     // Don't load Ko-fi widget on player page or when player is open
-    if (isPlayerPage || isMiniPlayerOpen || isPlayerOpen) {
+    if (isPlayerPage || isSettingsPage || isMiniPlayerOpen || isPlayerOpen) {
       const kofiWidget = document.querySelector('.floatingchat-container-wrap');
       if (kofiWidget) {
         kofiWidget.remove();
@@ -57,7 +58,7 @@ export function Footer() {
         kofiWidget.remove();
       }
     };
-  }, [isMiniPlayerOpen, isPlayerOpen, isPlayerPage]);
+  }, [isMiniPlayerOpen, isPlayerOpen, isPlayerPage, isSettingsPage]);
 
   return (
     <footer className="relative z-10 border-t border-white/5 mt-16 py-8 px-8">

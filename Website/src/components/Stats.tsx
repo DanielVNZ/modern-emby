@@ -19,6 +19,9 @@ interface WatchStats {
   newestWatched: EmbyItem | null;
   averageRating: number;
   totalItems: number;
+  activeSessions: number;
+  nowPlaying: number;
+  sessions: any[];
 }
 
 export function Stats() {
@@ -59,6 +62,18 @@ export function Stats() {
         includeItemTypes: 'Series',
         filters: 'IsPlayed',
       });
+
+      let activeSessions = 0;
+      let nowPlaying = 0;
+      let sessionsSnapshot: any[] = [];
+      try {
+        const sessions = await embyApi.getSessions();
+        activeSessions = sessions.length;
+        nowPlaying = sessions.filter((s: any) => s.NowPlayingItem).length;
+        sessionsSnapshot = sessions;
+      } catch (error) {
+        console.warn('Failed to load sessions:', error);
+      }
 
       // Calculate total watch time
       let totalWatchTimeTicks = 0;
@@ -134,6 +149,9 @@ export function Stats() {
         newestWatched,
         averageRating: ratedCount > 0 ? totalRating / ratedCount : 0,
         totalItems: playedMovies.TotalRecordCount + playedEpisodes.TotalRecordCount,
+        activeSessions,
+        nowPlaying,
+        sessions: sessionsSnapshot,
       });
     } catch (error) {
       console.error('Failed to load stats:', error);
@@ -673,6 +691,100 @@ export function Stats() {
             </div>
           </div>
         </div>
+
+        {/* Live Sessions */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          <div className="bg-gray-900 rounded-xl p-4 border border-white/10">
+            <p className="text-gray-400 text-xs mb-1">Active Sessions</p>
+            <p className="text-xl font-bold text-white">{stats.activeSessions}</p>
+          </div>
+          <div className="bg-gray-900 rounded-xl p-4 border border-white/10">
+            <p className="text-gray-400 text-xs mb-1">Now Playing</p>
+            <p className="text-xl font-bold text-white">{stats.nowPlaying}</p>
+          </div>
+        </div>
+
+        {/* Now Playing Details */}
+        {stats.sessions.filter((s) => s.NowPlayingItem).length > 0 && (
+          <div className="bg-gray-900 rounded-2xl p-6 border border-white/10 mb-8">
+            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5v14l11-7z" />
+              </svg>
+              Now Playing
+            </h3>
+            <div className="space-y-4">
+              {stats.sessions
+                .filter((s) => s.NowPlayingItem)
+                .map((s) => {
+                  const item = s.NowPlayingItem;
+                  const positionTicks = s.PlayState?.PositionTicks || 0;
+                  const runtimeTicks = item?.RunTimeTicks || 0;
+                  const position = runtimeTicks > 0 ? formatWatchTime(positionTicks) : '';
+                  const duration = runtimeTicks > 0 ? formatWatchTime(runtimeTicks) : '';
+                  const stream = item?.MediaSources?.[0];
+                  return (
+                    <div key={s.Id} className="rounded-xl border border-white/10 bg-black/40 p-4">
+                      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                        <div>
+                          <p className="text-white font-semibold">
+                            {item?.Name || 'Unknown Item'}
+                          </p>
+                          <p className="text-sm text-gray-400">
+                            {item?.ProductionYear ? `${item.ProductionYear} · ` : ''}
+                            {position && duration ? `${position} / ${duration}` : 'Playback in progress'}
+                          </p>
+                        </div>
+                        <div className="text-sm text-gray-400">
+                          {s.Client || 'Client'} {s.AppVersion ? `· ${s.AppVersion}` : ''} {s.DeviceName ? `· ${s.DeviceName}` : ''}
+                        </div>
+                      </div>
+                      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-gray-400">
+                        {(s.RemoteEndPoint || s.RemoteAddress || s.Protocol) && (
+                          <div>
+                            <p className="text-gray-500">Connection</p>
+                            <p className="text-gray-300">
+                              {s.RemoteEndPoint || s.RemoteAddress}
+                              {s.Protocol ? ` · ${s.Protocol}` : ''}
+                            </p>
+                          </div>
+                        )}
+                        {(stream?.Container || stream?.Bitrate) && (
+                          <div>
+                            <p className="text-gray-500">Stream</p>
+                            <p className="text-gray-300">
+                              {stream?.Container ? stream.Container.toUpperCase() : ''}
+                              {stream?.Bitrate ? ` · ${(stream.Bitrate / 1000000).toFixed(1)} mbps` : ''}
+                            </p>
+                          </div>
+                        )}
+                        {(stream?.VideoCodec || (stream?.Width && stream?.Height) || stream?.VideoRange) && (
+                          <div>
+                            <p className="text-gray-500">Video</p>
+                            <p className="text-gray-300">
+                              {stream?.VideoCodec ? stream.VideoCodec.toUpperCase() : ''}
+                              {stream?.Width && stream?.Height ? ` · ${stream.Width}x${stream.Height}` : ''}
+                              {stream?.VideoRange ? ` · ${stream.VideoRange}` : ''}
+                            </p>
+                          </div>
+                        )}
+                        {(stream?.AudioCodec || stream?.AudioChannels || stream?.AudioLanguage) && (
+                          <div>
+                            <p className="text-gray-500">Audio</p>
+                            <p className="text-gray-300">
+                              {stream?.AudioCodec ? stream.AudioCodec.toUpperCase() : ''}
+                              {stream?.AudioChannels ? ` · ${stream.AudioChannels}ch` : ''}
+                              {stream?.AudioLanguage ? ` · ${stream.AudioLanguage}` : ''}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        )}
 
         {/* Most Rewatched */}
         {stats.mostWatched.length > 0 && (

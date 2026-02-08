@@ -15,13 +15,14 @@ interface FilterState {
 }
 
 // Item Card with image loading animation
-function ItemCard({ item, imageUrl, onItemClick, isFavorite, isFavChanging, onToggleFavorite }: {
+function ItemCard({ item, imageUrl, onItemClick, isFavorite, isFavChanging, onToggleFavorite, index }: {
   item: EmbyItem;
   imageUrl: string;
   onItemClick: (item: EmbyItem) => void;
   isFavorite?: boolean;
   isFavChanging?: boolean;
   onToggleFavorite?: (item: EmbyItem) => void;
+  index: number;
 }) {
   const [isImageLoaded, setIsImageLoaded] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
@@ -31,7 +32,8 @@ function ItemCard({ item, imageUrl, onItemClick, isFavorite, isFavChanging, onTo
       onClick={() => onItemClick(item)}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      className="cursor-pointer group text-left w-full transition-all duration-300"
+      className="cursor-pointer group text-left w-full transition-all duration-300 soft-appear"
+      style={{ animationDelay: `${Math.min(index * 60, 900)}ms` }}
     >
       <div className={`relative aspect-[2/3] bg-gradient-to-br from-gray-800 to-gray-900 rounded-lg mb-3 shadow-2xl transition-all duration-300 ${
         isHovered ? 'scale-105 shadow-black/80 ring-2 ring-white/20' : 'shadow-black/40'
@@ -762,33 +764,6 @@ export function Browse() {
 
   // activeFiltersCount no longer needed for a toggle badge
 
-  if (isLoading) {
-    // Browse skeleton: header + filters + grid cards
-    return (
-      <div className="min-h-screen bg-black">
-        <div className="max-w-[1800px] mx-auto px-8 py-6">
-          <div className="h-10 w-32 bg-white/10 rounded mb-4 animate-pulse" />
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3 mb-6">
-            <div className="h-10 bg-white/10 rounded animate-pulse" />
-            <div className="h-10 bg-white/10 rounded animate-pulse" />
-            <div className="h-10 bg-white/10 rounded animate-pulse" />
-            <div className="h-10 bg-white/10 rounded animate-pulse" />
-            <div className="h-10 bg-white/10 rounded animate-pulse" />
-            <div className="h-10 bg-white/10 rounded animate-pulse" />
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-            {Array.from({ length: 12 }).map((_, i) => (
-              <div key={i} className="w-full">
-                <div className="aspect-[2/3] rounded-lg bg-gradient-to-br from-gray-800 to-gray-900 animate-pulse mb-3" />
-                <div className="h-4 bg-white/10 rounded w-10/12 mb-2 animate-pulse" />
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // Main UI
   return (
     <div className="min-h-screen bg-black">
@@ -989,7 +964,27 @@ export function Browse() {
         </div>
 
         {/* Content Grid */}
-        {filteredItems.length === 0 ? (
+        {isLoading ? (
+          <div className="max-w-[1800px] mx-auto px-8 py-6">
+            <div className="h-10 w-32 bg-white/10 rounded mb-4 animate-pulse" />
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3 mb-6">
+              <div className="h-10 bg-white/10 rounded animate-pulse" />
+              <div className="h-10 bg-white/10 rounded animate-pulse" />
+              <div className="h-10 bg-white/10 rounded animate-pulse" />
+              <div className="h-10 bg-white/10 rounded animate-pulse" />
+              <div className="h-10 bg-white/10 rounded animate-pulse" />
+              <div className="h-10 bg-white/10 rounded animate-pulse" />
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+              {Array.from({ length: 12 }).map((_, i) => (
+                <div key={i} className="w-full">
+                  <div className="aspect-[2/3] rounded-lg bg-gradient-to-br from-gray-800 to-gray-900 animate-pulse mb-3" />
+                  <div className="h-4 bg-white/10 rounded w-10/12 mb-2 animate-pulse" />
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : filteredItems.length === 0 ? (
           <div className="text-center py-20">
             <svg className="w-16 h-16 mx-auto text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
@@ -1000,7 +995,7 @@ export function Browse() {
         ) : (
           <>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-6">
-              {paginatedItems.map((item) => {
+              {paginatedItems.map((item, index) => {
               const imageUrl = item.ImageTags?.Primary
                 ? embyApi.getImageUrl(item.Id, 'Primary', { maxWidth: 400, tag: item.ImageTags.Primary })
                 : '';
@@ -1014,6 +1009,7 @@ export function Browse() {
                   isFavorite={!!item.UserData?.IsFavorite}
                   isFavChanging={!!favChanging[item.Id]}
                   onToggleFavorite={() => toggleFavorite(item)}
+                  index={index}
                 />
               );
             })}

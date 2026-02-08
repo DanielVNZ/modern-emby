@@ -20,11 +20,25 @@
         "minHeight": 600,
         "backgroundColor": "#00000000",
         "transparent": true,
+        "visible": false,
         "resizable": true,
         "fullscreen": false,
         "maximized": true,
         "devtools": true,
         "center": true
+      },
+      {
+        "label": "splashscreen",
+        "title": "Aether",
+        "url": "splashscreen.html",
+        "width": 520,
+        "height": 300,
+        "resizable": false,
+        "fullscreen": false,
+        "center": true,
+        "decorations": false,
+        "transparent": false,
+        "backgroundColor": "#000000"
       }
     ],
     "security": {

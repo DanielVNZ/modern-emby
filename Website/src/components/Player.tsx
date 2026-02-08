@@ -2,11 +2,11 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { unzipSync, strFromU8 } from 'fflate';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import Hls from 'hls.js';
-import shaka from 'shaka-player/dist/shaka-player.ui.js';
 import { embyApi } from '../services/embyApi';
 import { MediaSelector } from './MediaSelector';
 import { usePlayerUi } from '../context/PlayerUiContext';
 import { isTauri } from '@tauri-apps/api/core';
+import { appCacheDir, join } from '@tauri-apps/api/path';
 import type { MpvObservableProperty } from 'tauri-plugin-libmpv-api';
 // Inline skeleton replaces full-screen loading
 import type { MediaSource, EmbyItem } from '../types/emby.types';
@@ -16,19 +16,58 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
   const resolvedId = playerId ?? params.id;
   const navigate = useNavigate();
   const location = useLocation();
-  const { setActiveId, isCollapsed, setIsCollapsed, lastNonPlayerPath } = usePlayerUi();
+  const { setActiveId, isCollapsed, setIsCollapsed, lastNonPlayerPath, setSuppressAutoOpen } = usePlayerUi();
   const backgroundLocation = (location.state as { backgroundLocation?: unknown } | undefined)
     ?.backgroundLocation as typeof location | undefined;
   const isCollapsedView = isCollapsedProp ?? isCollapsed;
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
-  const shakaRef = useRef<shaka.Player | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const isInTauri = isTauri();
   const selectedPlayer = localStorage.getItem('emby_videoPlayer') || 'hlsjs';
-  const useShaka = selectedPlayer === 'shaka';
   const useLibmpv = isInTauri && selectedPlayer === 'libmpv';
+  const VOLUME_STORAGE_KEY = 'player_volume';
+  const MUTE_STORAGE_KEY = 'player_muted';
+  const MPV_AUTO_ZOOM_THRESHOLD = 1.05;
+  const clampVolume = (value: number) => Math.max(0, Math.min(1, value));
+  const getStoredVolume = (): number => {
+    const raw = localStorage.getItem(VOLUME_STORAGE_KEY);
+    const parsed = raw ? Number(raw) : 1;
+    if (!Number.isFinite(parsed)) return 1;
+    return clampVolume(parsed);
+  };
+  const getMpvAutoZoom = (videoParams: { width: number; height: number } | null): number | null => {
+    if (!videoParams) return null;
+    const container = containerRef.current;
+    if (!container) return null;
+    const width = videoParams.width;
+    const height = videoParams.height;
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
+    if (!Number.isFinite(containerWidth) || !Number.isFinite(containerHeight) || containerWidth <= 0 || containerHeight <= 0) {
+      return null;
+    }
+    const containerRatio = containerWidth / containerHeight;
+    if (!Number.isFinite(containerRatio) || containerRatio <= 0) return null;
+    const videoRatio = width / height;
+    if (!Number.isFinite(videoRatio) || videoRatio <= 0) return null;
+
+    // If the video is underscanned (bars on all sides), scale up until one side touches.
+    const fitScale = Math.min(containerWidth / width, containerHeight / height);
+    if (fitScale > MPV_AUTO_ZOOM_THRESHOLD) {
+      return Math.max(1, Math.min(2.5, fitScale));
+    }
+
+    // Otherwise, remove letterbox/pillarbox by zooming to fill (may crop the opposite side).
+    const ratio = containerRatio / videoRatio;
+    const cropScale = Math.max(ratio, 1 / ratio);
+    if (cropScale > MPV_AUTO_ZOOM_THRESHOLD) {
+      return Math.max(1, Math.min(2.5, cropScale));
+    }
+
+    return 1.0;
+  };
 
   const [item, setItem] = useState<EmbyItem | null>(null);
   const [mediaSources, setMediaSources] = useState<MediaSource[]>([]);
@@ -44,6 +83,12 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
   const [selectedAudioIndex, setSelectedAudioIndex] = useState<number | undefined>();
   const [customSubtitleUrl, setCustomSubtitleUrl] = useState<string>('');
   const [customSubtitleLabel, setCustomSubtitleLabel] = useState<string>('');
+  const [subtitleDelay, setSubtitleDelay] = useState<number>(() => {
+    const raw = localStorage.getItem('player_subtitleDelay');
+    const parsed = raw ? Number(raw) : 0;
+    if (Number.isNaN(parsed)) return 0;
+    return Math.max(-5, Math.min(5, parsed));
+  });
   const [subdlResults, setSubdlResults] = useState<any[]>([]);
   const [subdlTitles, setSubdlTitles] = useState<any[]>([]);
   const [subdlSelectedTitleId, setSubdlSelectedTitleId] = useState<string>('');
@@ -63,8 +108,8 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [bufferedPercentage, setBufferedPercentage] = useState(0);
-  const [volume, setVolume] = useState(1);
-  const [isMuted, setIsMuted] = useState(false);
+  const [volume, setVolume] = useState(() => getStoredVolume());
+  const [isMuted, setIsMuted] = useState(() => localStorage.getItem(MUTE_STORAGE_KEY) === 'true');
   const [isDragging, setIsDragging] = useState(false);
   const [dragTime, setDragTime] = useState(0);
   const [isHoveringSeekBar, setIsHoveringSeekBar] = useState(false);
@@ -107,6 +152,7 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
   const [mpvCacheDuration, setMpvCacheDuration] = useState<number>(0);
   const [mpvCacheSpeed, setMpvCacheSpeed] = useState<number>(0);
   const [mpvBufferedPercent, setMpvBufferedPercent] = useState<number>(0);
+  const [mpvVideoParams, setMpvVideoParams] = useState<{ width: number; height: number } | null>(null);
   const statsIntervalRef = useRef<number | null>(null);
   const hideTimeoutRef = useRef<number | null>(null);
   const progressIntervalRef = useRef<number | null>(null);
@@ -129,10 +175,18 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
   const mpvObservingRef = useRef(false);
   const mpvActiveRef = useRef(false);
   const mpvLastPauseRef = useRef<boolean | null>(null);
+  const mpvPauseRef = useRef(true);
   const mpvUnlistenRef = useRef<null | (() => void)>(null);
   const mpvPendingSeekRef = useRef<number | null>(null);
+  const mpvLastTimePosRef = useRef<number>(0);
+  const mpvLoadingResolvedRef = useRef<boolean>(false);
+  const mpvCacheDurationRef = useRef<number>(0);
+  const mpvLoadStartRef = useRef<number>(0);
+  const mpvFirstTimePosRef = useRef<number | null>(null);
+  const mpvFirstTimeWallRef = useRef<number>(0);
   const currentTimeRef = useRef<number>(0);
   const isPlayingRef = useRef<boolean>(false);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // Keyboard hold-to-seek for seek bar
   const seekHoldIntervalRef = useRef<number | null>(null);
   const seekHoldDirRef = useRef<'left' | 'right' | null>(null);
@@ -141,6 +195,7 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
   const playButtonFocusRef = useRef<HTMLButtonElement>(null);
   const lastSubdlSearchKeyRef = useRef<string>('');
   const subtitleBlobUrlRef = useRef<string>('');
+  const mpvSubtitlePathRef = useRef<string>('');
   const selectedSourceRef = useRef<MediaSource | null>(null);
   const playSessionIdRef = useRef<string>('');
   const nextEpisodeRef = useRef<EmbyItem | null>(null);
@@ -155,17 +210,11 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
     ['eof-reached', 'flag'],
     ['demuxer-cache-duration', 'double', 'none'],
     ['cache-speed', 'int64', 'none'],
+    ['video-params', 'node', 'none'],
   ] as const satisfies MpvObservableProperty[];
 
   const isAndroidTV = /Android/i.test(navigator.userAgent);
   const isLinuxDesktop = /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent);
-
-  // Install Shaka Player polyfills
-  useEffect(() => {
-    if (useShaka) {
-      shaka.polyfill.installAll();
-    }
-  }, []);
 
   useEffect(() => {
     selectedSourceRef.current = selectedSource;
@@ -195,13 +244,19 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
     if (!useLibmpv) return;
     const html = document.documentElement;
     const body = document.body;
-    html.classList.add('mpv-transparent');
-    body.classList.add('mpv-transparent');
+    const shouldBeTransparent = !isVideoLoading;
+    if (shouldBeTransparent) {
+      html.classList.add('mpv-transparent');
+      body.classList.add('mpv-transparent');
+    } else {
+      html.classList.remove('mpv-transparent');
+      body.classList.remove('mpv-transparent');
+    }
     return () => {
       html.classList.remove('mpv-transparent');
       body.classList.remove('mpv-transparent');
     };
-  }, [useLibmpv]);
+  }, [isVideoLoading, useLibmpv]);
 
   useEffect(() => {
     const body = document.body;
@@ -231,11 +286,6 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
         console.log('Destroying previous HLS instance');
         hlsRef.current.destroy();
         hlsRef.current = null;
-      }
-      if (shakaRef.current) {
-        console.log('Destroying previous Shaka instance');
-        shakaRef.current.destroy();
-        shakaRef.current = null;
       }
       // Invalidate any in-flight loads to avoid double-init in React strict mode
       loadTokenRef.current += 1;
@@ -279,10 +329,6 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
-      if (shakaRef.current) {
-        shakaRef.current.destroy();
-        shakaRef.current = null;
-      }
       if (hideTimeoutRef.current) {
         clearTimeout(hideTimeoutRef.current);
       }
@@ -296,6 +342,12 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
       if (subtitleBlobUrlRef.current) {
         URL.revokeObjectURL(subtitleBlobUrlRef.current);
         subtitleBlobUrlRef.current = '';
+      }
+      if (mpvSubtitlePathRef.current && isInTauri) {
+        import('@tauri-apps/plugin-fs')
+          .then(({ remove }) => remove(mpvSubtitlePathRef.current).catch(() => {}))
+          .catch(() => {});
+        mpvSubtitlePathRef.current = '';
       }
       if (mpvActiveRef.current && mpvApiRef.current) {
         mpvApiRef.current.destroy().catch(err => console.warn('Failed to destroy LibMPV instance:', err));
@@ -405,6 +457,39 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
     }
   }, [showStats, selectedSource, useLibmpv, mpvCacheDuration, mpvCacheSpeed]);
 
+  useEffect(() => {
+    if (!useLibmpv || !mpvApiRef.current || !mpvActiveRef.current) return;
+    const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+    const zoomFactor = autoZoomEnabled ? detectedZoom : videoZoom;
+    const zoomLog2 = Math.log2(Math.max(0.1, zoomFactor));
+    const panY = autoZoomEnabled ? clamp(detectedOffset / 100, -1, 1) : 0;
+    mpvApiRef.current.setProperty('video-zoom', zoomLog2).catch(() => {});
+    mpvApiRef.current.setProperty('video-pan-y', panY).catch(() => {});
+  }, [autoZoomEnabled, detectedOffset, detectedZoom, useLibmpv, videoZoom]);
+
+
+  useEffect(() => {
+    if (!useLibmpv || !mpvApiRef.current || !mpvActiveRef.current) return;
+    if (!customSubtitleUrl) {
+      mpvApiRef.current.command('sub-remove', ['all']).catch(() => {});
+      mpvApiRef.current.setProperty('sub-visibility', false).catch(() => {});
+      if (mpvSubtitlePathRef.current) {
+        import('@tauri-apps/plugin-fs')
+          .then(({ remove }) => remove(mpvSubtitlePathRef.current).catch(() => {}))
+          .catch(() => {});
+        mpvSubtitlePathRef.current = '';
+      }
+      return;
+    }
+    mpvApiRef.current.setProperty('sub-visibility', true).catch(() => {});
+    mpvApiRef.current.command('sub-add', [customSubtitleUrl, 'select']).catch(() => {});
+  }, [customSubtitleUrl, useLibmpv]);
+
+  useEffect(() => {
+    if (!useLibmpv || !mpvApiRef.current || !mpvActiveRef.current) return;
+    mpvApiRef.current.setProperty('sub-delay', subtitleDelay).catch(() => {});
+  }, [subtitleDelay, useLibmpv]);
+
   // Effect to show "Up Next" popup when within 2 minutes of end
   useEffect(() => {
     if (nextEpisode && duration > 0 && currentTime > 0) {
@@ -447,6 +532,40 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
       return () => window.clearTimeout(t);
     }
   }, [customSubtitleUrl]);
+
+  useEffect(() => {
+    if (useLibmpv || !isInTauri) return;
+    if (!customSubtitleUrl) return;
+    if (
+      customSubtitleUrl.startsWith('blob:') ||
+      customSubtitleUrl.startsWith('http://') ||
+      customSubtitleUrl.startsWith('https://') ||
+      customSubtitleUrl.startsWith('tauri://')
+    ) {
+      return;
+    }
+    const looksLikeFilePath = /^[a-zA-Z]:\\/.test(customSubtitleUrl) || customSubtitleUrl.startsWith('/');
+    if (!looksLikeFilePath) return;
+
+    let cancelled = false;
+    import('@tauri-apps/plugin-fs')
+      .then(({ readTextFile }) => readTextFile(customSubtitleUrl))
+      .then((text) => {
+        if (cancelled) return;
+        if (subtitleBlobUrlRef.current) {
+          URL.revokeObjectURL(subtitleBlobUrlRef.current);
+        }
+        const blob = new Blob([text], { type: 'text/vtt' });
+        const url = URL.createObjectURL(blob);
+        subtitleBlobUrlRef.current = url;
+        setCustomSubtitleUrl(url);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [customSubtitleUrl, isInTauri, useLibmpv]);
 
   // Effect to handle fullscreen changes
   useEffect(() => {
@@ -514,6 +633,8 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
     const handleVolumeChange = () => {
       setVolume(video.volume);
       setIsMuted(video.muted);
+      localStorage.setItem(VOLUME_STORAGE_KEY, String(video.volume));
+      localStorage.setItem(MUTE_STORAGE_KEY, String(video.muted));
     };
     const handleProgress = () => {
       updateBufferedPercentage();
@@ -598,6 +719,19 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
       video.removeEventListener('loadeddata', handleLoadedData);
     };
   }, [streamUrl]);
+
+  useEffect(() => {
+    if (useLibmpv) return;
+    const video = videoRef.current;
+    if (!video || !streamUrl) return;
+    const nextVolume = clampVolume(volume);
+    if (video.volume !== nextVolume) {
+      video.volume = nextVolume;
+    }
+    if (video.muted !== isMuted) {
+      video.muted = isMuted;
+    }
+  }, [isMuted, streamUrl, useLibmpv, volume]);
 
   // Effect for automatic black bar detection
   useEffect(() => {
@@ -814,6 +948,35 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
       }
     };
   }, [autoZoomEnabled, isCollapsedView, streamUrl, useLibmpv]);
+
+  // MPV auto-zoom: compute fill zoom from video aspect vs container aspect
+  useEffect(() => {
+    if (!useLibmpv || !autoZoomEnabled || !streamUrl || isCollapsedView) {
+      return;
+    }
+    const autoZoom = getMpvAutoZoom(mpvVideoParams);
+    if (autoZoom === null) return;
+    setDetectedZoom(autoZoom);
+    setDetectedOffset(0);
+    setAutoZoomLocked(true);
+    autoZoomLockedRef.current = true;
+  }, [autoZoomEnabled, isCollapsedView, mpvVideoParams, streamUrl, useLibmpv]);
+
+  useEffect(() => {
+    if (!useLibmpv || !autoZoomEnabled) return;
+    const handleResize = () => {
+      setAutoZoomLocked(false);
+      autoZoomLockedRef.current = false;
+      const autoZoom = getMpvAutoZoom(mpvVideoParams);
+      if (autoZoom === null) return;
+      setDetectedZoom(autoZoom);
+      setDetectedOffset(0);
+      setAutoZoomLocked(true);
+      autoZoomLockedRef.current = true;
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [autoZoomEnabled, mpvVideoParams, useLibmpv]);
 
   const handleMouseMove = () => {
     // On Android TV, some devices generate synthetic mousemove events
@@ -1107,11 +1270,39 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
     if (subtitleBlobUrlRef.current) {
       URL.revokeObjectURL(subtitleBlobUrlRef.current);
     }
-    const blob = new Blob([subtitleText], { type: 'text/vtt' });
-    const url = URL.createObjectURL(blob);
-    subtitleBlobUrlRef.current = url;
-    setCustomSubtitleUrl(url);
+    if (useLibmpv && isInTauri) {
+      const filePath = await writeSubtitleToTempFile(subtitleText);
+      if (filePath) {
+        setCustomSubtitleUrl(filePath);
+      }
+    } else {
+      const blob = new Blob([subtitleText], { type: 'text/vtt' });
+      const url = URL.createObjectURL(blob);
+      subtitleBlobUrlRef.current = url;
+      setCustomSubtitleUrl(url);
+    }
     setCustomSubtitleLabel(subtitleLabel);
+  };
+
+  const writeSubtitleToTempFile = async (content: string): Promise<string | null> => {
+    if (!isInTauri) return null;
+    try {
+      const { writeTextFile, mkdir, remove } = await import('@tauri-apps/plugin-fs');
+      const baseDir = await appCacheDir();
+      const dir = await join(baseDir, 'subtitles');
+      await mkdir(dir, { recursive: true });
+      if (mpvSubtitlePathRef.current) {
+        await remove(mpvSubtitlePathRef.current).catch(() => {});
+      }
+      const filename = `subtitle-${Date.now()}-${Math.random().toString(36).slice(2)}.vtt`;
+      const path = await join(dir, filename);
+      await writeTextFile(path, content);
+      mpvSubtitlePathRef.current = path;
+      return path;
+    } catch (err) {
+      console.error('Failed to write subtitle file for MPV:', err);
+      return null;
+    }
   };
 
   const applySubtitleFromText = (subtitleText: string, subtitleLabel: string, formatHint?: string) => {
@@ -1123,10 +1314,18 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
     if (subtitleBlobUrlRef.current) {
       URL.revokeObjectURL(subtitleBlobUrlRef.current);
     }
-    const blob = new Blob([text], { type: 'text/vtt' });
-    const url = URL.createObjectURL(blob);
-    subtitleBlobUrlRef.current = url;
-    setCustomSubtitleUrl(url);
+    if (useLibmpv && isInTauri) {
+      void writeSubtitleToTempFile(text).then((filePath) => {
+        if (filePath) {
+          setCustomSubtitleUrl(filePath);
+        }
+      });
+    } else {
+      const blob = new Blob([text], { type: 'text/vtt' });
+      const url = URL.createObjectURL(blob);
+      subtitleBlobUrlRef.current = url;
+      setCustomSubtitleUrl(url);
+    }
     setCustomSubtitleLabel(subtitleLabel);
   };
 
@@ -1361,6 +1560,14 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
     if (!useLibmpv) return;
     setIsVideoLoading(true);
     setError('');
+    mpvLoadingResolvedRef.current = false;
+    mpvLastTimePosRef.current = 0;
+    mpvPauseRef.current = true;
+    mpvCacheDurationRef.current = 0;
+    mpvLoadStartRef.current = Date.now();
+    mpvFirstTimePosRef.current = null;
+    mpvFirstTimeWallRef.current = 0;
+    setMpvVideoParams(null);
 
     const loadToken = ++loadTokenRef.current;
     const isStale = () => loadToken !== loadTokenRef.current;
@@ -1368,10 +1575,6 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
-    }
-    if (shakaRef.current) {
-      await shakaRef.current.destroy();
-      shakaRef.current = null;
     }
 
     if (isStale()) return;
@@ -1428,8 +1631,18 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
 
             if (typeof timePos === 'number') {
               setCurrentTime(timePos);
-              if (timePos > 0) {
-                setIsVideoLoading(false);
+              mpvLastTimePosRef.current = timePos;
+              if (mpvFirstTimePosRef.current === null) {
+                mpvFirstTimePosRef.current = timePos;
+                mpvFirstTimeWallRef.current = Date.now();
+              }
+              if (!mpvLoadingResolvedRef.current) {
+                const startPos = mpvFirstTimePosRef.current ?? timePos;
+                const elapsedMs = Date.now() - mpvFirstTimeWallRef.current;
+                if (elapsedMs >= 1000 && timePos - startPos >= 1.0) {
+                  setIsVideoLoading(false);
+                  mpvLoadingResolvedRef.current = true;
+                }
               }
               if (mpvPendingSeekRef.current !== null) {
                 const seekTarget = mpvPendingSeekRef.current;
@@ -1439,9 +1652,6 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
             }
             if (typeof durationValue === 'number' && !Number.isNaN(durationValue)) {
               setDuration(durationValue);
-              if (durationValue > 0) {
-                setIsVideoLoading(false);
-              }
               if (mpvPendingSeekRef.current !== null) {
                 const seekTarget = mpvPendingSeekRef.current;
                 mpvPendingSeekRef.current = null;
@@ -1449,6 +1659,7 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
               }
             }
             if (typeof pauseValue === 'boolean') {
+              mpvPauseRef.current = pauseValue;
               setIsPlaying(!pauseValue);
               const source = selectedSourceRef.current;
               const sessionId = playSessionIdRef.current;
@@ -1475,9 +1686,18 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
             }
             if (typeof cacheDuration === 'number') {
               setMpvCacheDuration(cacheDuration);
+              mpvCacheDurationRef.current = cacheDuration;
             }
             if (typeof cacheSpeed === 'number') {
               setMpvCacheSpeed(cacheSpeed);
+            }
+            if (name === 'video-params' && data && typeof data === 'object') {
+              const params = data as { w?: number; h?: number; dw?: number; dh?: number; width?: number; height?: number; dwidth?: number; dheight?: number };
+              const width = Number(params.dw ?? params.w ?? params.dwidth ?? params.width);
+              const height = Number(params.dh ?? params.h ?? params.dheight ?? params.height);
+              if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+                setMpvVideoParams({ width, height });
+              }
             }
             if (eofReached) {
               const source = selectedSourceRef.current;
@@ -1506,7 +1726,29 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
       if (isStale()) return;
       mpvActiveRef.current = true;
       await mpvApi.command('loadfile', [url, 'replace']);
+      await mpvApi.setProperty('volume', Math.round(clampVolume(volume) * 100));
+      await mpvApi.setProperty('mute', isMuted);
       await mpvApi.setProperty('pause', false);
+      mpvPauseRef.current = false;
+      mpvLastPauseRef.current = false;
+      setIsPlaying(true);
+      // Apply current filter/zoom/subtitles for LibMPV sessions
+      try {
+        const zoomFactor = autoZoomEnabled ? detectedZoom : videoZoom;
+        const zoomLog2 = Math.log2(Math.max(0.1, zoomFactor));
+        const panY = autoZoomEnabled ? Math.max(-1, Math.min(1, detectedOffset / 100)) : 0;
+        await mpvApi.setProperty('video-zoom', zoomLog2);
+        await mpvApi.setProperty('video-pan-y', panY);
+        if (customSubtitleUrl) {
+          await mpvApi.setProperty('sub-visibility', true);
+          await mpvApi.command('sub-add', [customSubtitleUrl, 'select']);
+          await mpvApi.setProperty('sub-delay', subtitleDelay);
+        } else {
+          await mpvApi.setProperty('sub-visibility', false);
+        }
+      } catch (err) {
+        console.warn('Failed to apply MPV filters/zoom/subtitles:', err);
+      }
       if (startPosition > 0) {
         mpvPendingSeekRef.current = startPosition;
       }
@@ -1556,10 +1798,6 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
-    }
-    if (shakaRef.current) {
-      await shakaRef.current.destroy();
-      shakaRef.current = null;
     }
 
     if (isStale()) return;
@@ -1629,164 +1867,7 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
     video.addEventListener('ended', handleEnded);
     playbackHandlersRef.current = { pause: handlePause, play: handlePlay, ended: handleEnded };
 
-    // Use Shaka Player if enabled
-    if (useShaka && shaka.Player.isBrowserSupported()) {
-      console.log('Using Shaka Player');
-      
-      // Create player instance
-      const player = new shaka.Player();
-      shakaRef.current = player;
-      
-        try {
-          if (isStale()) {
-            if (shakaRef.current === player) {
-              await player.destroy();
-              shakaRef.current = null;
-            }
-            return;
-          }
-          const videoElement = videoRef.current;
-          if (!videoElement) {
-            await player.destroy();
-            if (shakaRef.current === player) {
-              shakaRef.current = null;
-            }
-            return;
-          }
-          // Attach to video element first
-          await player.attach(videoElement);
-        if (isStale()) {
-          if (shakaRef.current === player) {
-            await player.destroy();
-            shakaRef.current = null;
-          }
-          return;
-        }
-        // Configure Shaka for optimal performance and Dolby support
-        player.configure({
-          streaming: {
-            bufferingGoal: 1800, // Buffer up to 30 minutes ahead
-            rebufferingGoal: 10,
-            bufferBehind: 300, // Keep 5 mins of back buffer
-          },
-          manifest: {
-            defaultPresentationDelay: 0,
-          },
-        });
-        
-        // Load the manifest (use startPosition to keep A/V sync)
-        await player.load(url, startPosition > 0 ? startPosition : undefined);
-        if (isStale()) {
-          if (shakaRef.current === player) {
-            await player.destroy();
-            shakaRef.current = null;
-          }
-          return;
-        }
-        
-        console.log('Shaka Player loaded, starting playback');
-        videoRef.current?.play().catch(e => {
-          if (e?.name === 'AbortError' && isStale()) return;
-          console.log('Autoplay prevented:', e);
-        });
-      } catch (error: any) {
-        // Ignore LOAD_INTERRUPTED errors - they're expected when switching streams quickly
-        if (error.code === 7000) {
-          console.log('Shaka load interrupted (switching streams), ignoring...');
-          return;
-        }
-        console.error('Shaka Player error:', error);
-        setError('Failed to load video stream with Shaka Player');
-        if (shakaRef.current === player) {
-          await player.destroy();
-          shakaRef.current = null;
-        }
-      }
-      
-      player.addEventListener('error', (event: any) => {
-        const error = event.detail;
-        console.error('Shaka Player error event:', event);
-        
-        // If Shaka has already handled the error, don't interfere
-        if (error.handled) {
-          console.log('Error already handled by Shaka Player');
-          return;
-        }
-        
-        // Check error severity: 1 = recoverable, 2 = critical
-        if (error.severity === 2) {
-          // Critical error - needs handling
-          console.error(`Shaka critical error ${error.code}:`, error);
-          
-          // Error 7000 is often auto-recovered by Shaka, give it a moment
-          if (error.code === 7000) {
-            console.log('Error 7000 detected, allowing Shaka to auto-recover...');
-            // Wait a bit to see if Shaka recovers automatically
-            setTimeout(() => {
-              // Check if playback has recovered (video is loading or playing)
-              if (videoRef.current && (
-                videoRef.current.readyState >= 2 || 
-                !videoRef.current.paused
-              )) {
-                console.log('Shaka auto-recovered from error 7000');
-                return;
-              }
-              // If not recovered, try manual recovery
-              console.log('Attempting manual recovery from error 7000...');
-              const recovered = player.retryStreaming();
-              if (!recovered) {
-                setError('Streaming error occurred');
-              }
-            }, 2000);
-            return;
-          }
-          
-          // Handle other critical errors
-          if (error.category === 1) { // Network errors
-            console.log('Network error detected, attempting recovery...');
-            const recovered = player.retryStreaming();
-            if (!recovered) {
-              setError('Network error - unable to load video stream');
-            }
-          } else if (error.category === 3) { // Manifest/Text errors
-            // Error 3015 is MEDIA_SOURCE_OPERATION_THREW - happens during cleanup when switching streams
-            // Just ignore it, it's not recoverable and not a real playback issue
-            if (error.code === 3015) {
-              console.log('MediaSource cleanup error (3015), ignoring...');
-              return;
-            }
-            // Error 3017 is SEGMENT_MISSING - happens when paused too long, server discards old segments
-            if (error.code === 3017) {
-              console.log('Segment missing error (3017), attempting recovery...');
-              const recovered = player.retryStreaming();
-              if (!recovered) {
-                // Don't show error, just retry when user resumes
-                console.warn('Could not auto-recover, playback may resume when user interacts');
-              }
-              return;
-            }
-            console.log('Manifest error detected, attempting to reload...');
-            const recovered = player.retryStreaming();
-            if (!recovered) {
-              setError('Failed to parse video manifest');
-            }
-          } else if (error.category === 7) { // Other streaming errors
-            console.log('Streaming error detected, attempting recovery...');
-            const recovered = player.retryStreaming();
-            if (!recovered) {
-              setError('Streaming error occurred');
-            }
-          } else {
-            setError(`Playback error: ${error.code}`);
-          }
-        } else {
-          // Recoverable error (severity 1) - just log it
-          console.warn(`Shaka recoverable error ${error.code}:`, error);
-        }
-      });
-      
-      shakaRef.current = player;
-    } else if (Hls.isSupported()) {
+    if (Hls.isSupported()) {
       if (isStale()) return;
       console.log('Using HLS.js');
       const hls = new Hls({
@@ -1990,14 +2071,10 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
       console.error('Failed to report playback stopped:', err);
     }
     
-    // Destroy current player instances - await Shaka to ensure clean state
+    // Destroy current player instances - await to ensure clean state
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
-    }
-    if (shakaRef.current) {
-      await shakaRef.current.destroy();
-      shakaRef.current = null;
     }
     if (mpvActiveRef.current && mpvApiRef.current) {
       try {
@@ -2040,141 +2117,7 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
         return;
       }
 
-      // Use Shaka Player if enabled
-        if (useShaka && shaka.Player.isBrowserSupported()) {
-          const player = new shaka.Player();
-          shakaRef.current = player;
-          
-          try {
-            const videoElement = videoRef.current;
-            if (!videoElement) {
-              await player.destroy();
-              if (shakaRef.current === player) {
-                shakaRef.current = null;
-              }
-              return;
-            }
-            // Attach to video element first
-            await player.attach(videoElement);
-          
-          player.configure({
-            streaming: {
-              bufferingGoal: 1800,
-              rebufferingGoal: 10,
-              bufferBehind: 300,
-            },
-            manifest: {
-              defaultPresentationDelay: 0,
-            },
-          });
-          
-            await player.load(url, currentTime > 0 ? currentTime : undefined);
-            
-            videoRef.current?.play().catch(e => console.log('Autoplay prevented:', e));
-          } catch (error: any) {
-            // Ignore LOAD_INTERRUPTED errors - they're expected when switching streams quickly
-            if (error.code === 7000) {
-              console.log('Shaka load interrupted (switching audio), ignoring...');
-              return;
-            }
-            console.error('Shaka Player error:', error);
-            setError('Failed to change audio track');
-            if (shakaRef.current === player) {
-              await player.destroy();
-              shakaRef.current = null;
-            }
-          }
-        
-        // Add error event listener for runtime errors
-        player.addEventListener('error', (event: any) => {
-          const error = event.detail;
-          console.error('Shaka Player error event:', event);
-          
-          // If Shaka has already handled the error, don't interfere
-          if (error.handled) {
-            console.log('Error already handled by Shaka Player');
-            return;
-          }
-          
-          // Check error severity: 1 = recoverable, 2 = critical
-          if (error.severity === 2) {
-            // Error 3018 is INVALID_TEXT_CUE - a subtitle parsing error that's not critical
-            if (error.code === 3018) {
-              console.warn('Subtitle parsing error (3018), ignoring as non-critical:', error);
-              return;
-            }
-            
-            console.error(`Shaka critical error ${error.code}:`, error);
-            
-            // Error 7000 is often auto-recovered by Shaka, give it a moment
-            if (error.code === 7000) {
-              console.log('Error 7000 detected, allowing Shaka to auto-recover...');
-              // Wait a bit to see if Shaka recovers automatically
-              setTimeout(() => {
-                // Check if playback has recovered (video is loading or playing)
-                if (videoRef.current && (
-                  videoRef.current.readyState >= 2 || 
-                  !videoRef.current.paused
-                )) {
-                  console.log('Shaka auto-recovered from error 7000');
-                  return;
-                }
-                // If not recovered, try manual recovery
-                console.log('Attempting manual recovery from error 7000...');
-                const recovered = player.retryStreaming();
-                if (!recovered) {
-                  setError('Streaming error occurred');
-                }
-              }, 2000);
-              return;
-            }
-            
-            // Handle other critical errors
-            if (error.category === 1) { // Network errors
-              console.log('Network error detected, attempting recovery...');
-              const recovered = player.retryStreaming();
-              if (!recovered) {
-                setError('Network error - unable to load video stream');
-              }
-            } else if (error.category === 3) { // Manifest/Text errors
-              // Error 3015 is MEDIA_SOURCE_OPERATION_THREW - happens during cleanup when switching streams
-              // Just ignore it, it's not recoverable and not a real playback issue
-              if (error.code === 3015) {
-                console.log('MediaSource cleanup error (3015), ignoring...');
-                return;
-              }
-              // Error 3017 is SEGMENT_MISSING - happens when paused too long, server discards old segments
-              if (error.code === 3017) {
-                console.log('Segment missing error (3017), attempting recovery...');
-                const recovered = player.retryStreaming();
-                if (!recovered) {
-                  // Don't show error, just retry when user resumes
-                  console.warn('Could not auto-recover, playback may resume when user interacts');
-                }
-                return;
-              }
-              console.log('Manifest error detected, attempting to reload...');
-              const recovered = player.retryStreaming();
-              if (!recovered) {
-                setError('Failed to parse video manifest');
-              }
-            } else if (error.category === 7) { // Other streaming errors
-              console.log('Streaming error detected, attempting recovery...');
-              const recovered = player.retryStreaming();
-              if (!recovered) {
-                setError('Streaming error occurred');
-              }
-            } else {
-              setError(`Playback error: ${error.code}`);
-            }
-          } else {
-            // Recoverable error (severity 1) - just log it
-            console.warn(`Shaka recoverable error ${error.code}:`, error);
-          }
-        });
-        
-        shakaRef.current = player;
-      } else {
+      {
         const hls = new Hls({
           enableWorker: true,
           lowLatencyMode: false,
@@ -2247,9 +2190,10 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
       mpvObservingRef.current = false;
       mpvLastPauseRef.current = null;
     }
+    setSuppressAutoOpen(true);
     setActiveId(null);
     setIsCollapsed(false);
-    navigate(lastNonPlayerPath || '/home');
+    navigate(lastNonPlayerPath || '/home', { replace: true });
   };
 
   const handleCollapse = () => {
@@ -2295,10 +2239,6 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
-    }
-    if (shakaRef.current) {
-      shakaRef.current.destroy();
-      shakaRef.current = null;
     }
     if (mpvActiveRef.current && mpvApiRef.current) {
       try {
@@ -2348,10 +2288,6 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
-    }
-    if (shakaRef.current) {
-      shakaRef.current.destroy();
-      shakaRef.current = null;
     }
     if (mpvActiveRef.current && mpvApiRef.current) {
       try {
@@ -2422,12 +2358,14 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
       const nextMuted = !isMuted;
       mpvApiRef.current.setProperty('mute', nextMuted).catch(() => {});
       setIsMuted(nextMuted);
+      localStorage.setItem(MUTE_STORAGE_KEY, String(nextMuted));
       showControlsTemporarily();
       return;
     }
     if (!videoRef.current) return;
     videoRef.current.muted = !videoRef.current.muted;
     setIsMuted(videoRef.current.muted);
+    localStorage.setItem(MUTE_STORAGE_KEY, String(videoRef.current.muted));
     showControlsTemporarily();
   }, [isMuted, showControlsTemporarily, useLibmpv]);
 
@@ -2607,18 +2545,22 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
     if (useLibmpv && mpvApiRef.current) {
       mpvApiRef.current.setProperty('volume', Math.round(newVolume * 100)).catch(() => {});
       setVolume(newVolume);
+      localStorage.setItem(VOLUME_STORAGE_KEY, String(newVolume));
       if (newVolume > 0 && isMuted) {
         mpvApiRef.current.setProperty('mute', false).catch(() => {});
         setIsMuted(false);
+        localStorage.setItem(MUTE_STORAGE_KEY, 'false');
       }
       return;
     }
     if (!videoRef.current) return;
     videoRef.current.volume = newVolume;
     setVolume(newVolume);
+    localStorage.setItem(VOLUME_STORAGE_KEY, String(newVolume));
     if (newVolume > 0 && isMuted) {
       videoRef.current.muted = false;
       setIsMuted(false);
+      localStorage.setItem(MUTE_STORAGE_KEY, 'false');
     }
   };
 
@@ -2750,7 +2692,9 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
       {streamUrl && (
         <div
           ref={containerRef}
-          className={`player-ui fixed inset-0 z-50 ${useLibmpv ? 'bg-transparent' : 'bg-black'} overflow-hidden border-t border-white/10 shadow-2xl motion-safe:transition-transform motion-safe:duration-500 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] [--mini-height:5rem] sm:[--mini-height:6rem]`}
+          className={`player-ui fixed inset-0 z-50 ${
+            useLibmpv && !isVideoLoading ? 'bg-transparent' : 'bg-black'
+          } overflow-hidden border-t border-white/10 shadow-2xl motion-safe:transition-transform motion-safe:duration-500 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] [--mini-height:5rem] sm:[--mini-height:6rem]`}
           style={
             {
               transform: isCollapsedView ? 'translateY(calc(100% - var(--mini-height)))' : 'translateY(0)',
@@ -2765,6 +2709,14 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
           }
           onMouseMove={isCollapsedView ? undefined : handleMouseMove}
           onMouseLeave={isCollapsedView ? undefined : handleMouseLeave}
+          onClick={(e) => {
+            if (!useLibmpv || isCollapsedView) return;
+            const target = e.target as HTMLElement;
+            if (target.closest('.player-controls, .player-control, [role="menu"], button, input, select, textarea')) {
+              return;
+            }
+            togglePlayPause();
+          }}
         >
           {/* Header overlay */}
           {!isCollapsedView && (
@@ -2856,8 +2808,8 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
             crossOrigin="anonymous"
             poster={posterUrl}
           >
-            {/* Subtitle tracks */}
-            {customSubtitleUrl && (
+            {/* Subtitle tracks (HTML5 only) */}
+            {customSubtitleUrl && !useLibmpv && (
               <track
                 key={`subdl-${customSubtitleUrl}`}
                 kind="subtitles"
@@ -3346,39 +3298,41 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
               </svg>
             </button>
 
-            {/* Video filter button */}
-            <div className="relative" role="listitem">
-              <button
-                onClick={() => { setShowFilterMenu(!showFilterMenu); setShowAudioMenu(false); setShowSubtitleMenu(false); setShowZoomMenu(false); }}
-                className={`player-control px-4 py-2.5 bg-black/60 hover:bg-black/80 text-white text-sm rounded-full transition-all duration-200 backdrop-blur-md border hover:scale-105 active:scale-95 flex items-center gap-2 ${
-                  selectedFilter !== 'normal' ? 'border-blue-500 bg-blue-500/20' : 'border-white/10 hover:border-white/20'
-                }`}
-                tabIndex={0}
-                title="Video Filters"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h18M6 12h12M10 19h4" />
-                </svg>
-                Filters
-              </button>
+            {/* Video filter button (HLS only) */}
+            {!useLibmpv && (
+              <div className="relative" role="listitem">
+                <button
+                  onClick={() => { setShowFilterMenu(!showFilterMenu); setShowAudioMenu(false); setShowSubtitleMenu(false); setShowZoomMenu(false); }}
+                  className={`player-control px-4 py-2.5 bg-black/60 hover:bg-black/80 text-white text-sm rounded-full transition-all duration-200 backdrop-blur-md border hover:scale-105 active:scale-95 flex items-center gap-2 ${
+                    selectedFilter !== 'normal' ? 'border-blue-500 bg-blue-500/20' : 'border-white/10 hover:border-white/20'
+                  }`}
+                  tabIndex={0}
+                  title="Video Filters"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h18M6 12h12M10 19h4" />
+                  </svg>
+                  Filters
+                </button>
 
-              {showFilterMenu && (
-                <div className="absolute bottom-full mb-2 right-0 bg-gray-900/95 backdrop-blur-md border border-white/10 rounded-xl shadow-2xl min-w-[220px] max-h-[300px] overflow-y-auto" role="menu">
-                  {filterPresets.map(preset => (
-                    <button
-                      key={preset.key}
-                      onClick={() => applyFilter(preset.key)}
-                      className={`player-menu-item w-full px-4 py-3 text-left transition-all duration-150 border-b border-white/5 last:border-b-0 ${
-                        selectedFilter === preset.key ? 'bg-blue-500/20 text-blue-400' : 'text-white hover:bg-white/10'
-                      }`}
-                      role="menuitem"
-                    >
-                      <div className="font-medium">{preset.name}</div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+                {showFilterMenu && (
+                  <div className="absolute bottom-full mb-2 right-0 bg-gray-900/95 backdrop-blur-md border border-white/10 rounded-xl shadow-2xl min-w-[220px] max-h-[300px] overflow-y-auto" role="menu">
+                    {filterPresets.map(preset => (
+                      <button
+                        key={preset.key}
+                        onClick={() => applyFilter(preset.key)}
+                        className={`player-menu-item w-full px-4 py-3 text-left transition-all duration-150 border-b border-white/5 last:border-b-0 ${
+                          selectedFilter === preset.key ? 'bg-blue-500/20 text-blue-400' : 'text-white hover:bg-white/10'
+                        }`}
+                        role="menuitem"
+                      >
+                        <div className="font-medium">{preset.name}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Video zoom button */}
             <div className="relative" role="listitem">
@@ -3441,7 +3395,7 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
             )}
 
             {/* Subtitle selector (SubDL) */}
-            {((localStorage.getItem('subdl_apiKey') || '').length > 0 || customSubtitleUrl) && (
+            {(useLibmpv || (localStorage.getItem('subdl_apiKey') || '').length > 0 || customSubtitleUrl) && (
               <div className="relative" role="listitem">
                 <button
                   onClick={() => { setShowSubtitleMenu(!showSubtitleMenu); setShowAudioMenu(false); setShowFilterMenu(false); }}
@@ -3460,11 +3414,55 @@ export function Player({ id: playerId, isCollapsed: isCollapsedProp }: { id?: st
                   <div className="absolute bottom-full mb-2 right-0 bg-gray-900/95 backdrop-blur-md border border-white/10 rounded-xl shadow-2xl min-w-[300px] max-h-[360px] overflow-y-auto" role="menu">
                     <div className="px-4 pt-4 pb-2 border-b border-white/5">
                       <div className="text-xs text-gray-400">SubDL Subtitles</div>
+                      {((localStorage.getItem('subdl_apiKey') || '').length === 0) && (
+                        <div className="text-xs text-gray-500 mt-1">
+                          To use subtitles, set a SubDL key in Settings.
+                        </div>
+                      )}
                       {customSubtitleLabel ? (
                         <div className="text-sm text-blue-300 mt-1">Active: {customSubtitleLabel}</div>
                       ) : (
                         <div className="text-sm text-gray-300 mt-1">No subtitle selected</div>
                       )}
+                    </div>
+
+                    <div className="px-4 py-3 border-b border-white/5">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="text-xs text-gray-400">Subtitle Delay</div>
+                        <div className="text-xs text-gray-300 tabular-nums">
+                          {subtitleDelay >= 0 ? '+' : ''}{subtitleDelay.toFixed(1)}s
+                        </div>
+                      </div>
+                      <input
+                        type="range"
+                        min={-5}
+                        max={5}
+                        step={0.1}
+                        value={subtitleDelay}
+                        onChange={(e) => {
+                          const next = Math.max(-5, Math.min(5, Number(e.target.value)));
+                          setSubtitleDelay(next);
+                          localStorage.setItem('player_subtitleDelay', String(next));
+                        }}
+                        className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0"
+                        style={{
+                          background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${((subtitleDelay + 5) / 10) * 100}%, #374151 ${((subtitleDelay + 5) / 10) * 100}%, #374151 100%)`
+                        }}
+                      />
+                      <div className="mt-2 flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setSubtitleDelay(0);
+                            localStorage.setItem('player_subtitleDelay', '0');
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg bg-white/10 text-white hover:bg-white/20 text-xs transition-all"
+                        >
+                          Reset
+                        </button>
+                        <div className="text-[11px] text-gray-500">
+                          Negative = earlier, positive = later
+                        </div>
+                      </div>
                     </div>
 
                     <button

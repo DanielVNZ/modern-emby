@@ -10,6 +10,9 @@
     "updater:default",
     "updater:allow-check",
     "updater:allow-download-and-install",
-    "libmpv:default"
+    "libmpv:default",
+    "fs:allow-mkdir",
+    "fs:allow-appcache-write",
+    "fs:allow-appcache-write-recursive"
   ]
 }

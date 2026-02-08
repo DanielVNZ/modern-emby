@@ -551,6 +551,10 @@ class EmbyApiService {
     
     return this.request<ItemsResponse>(`/Users/${this.userId}/Items?${queryParams.toString()}`);
   }
+
+  async getSessions(): Promise<any[]> {
+    return this.request<any[]>('/Sessions');
+  }
 }
 
 export const embyApi = new EmbyApiService();
